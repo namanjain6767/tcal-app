@@ -1,35 +1,39 @@
 // server.js
 
 const express = require('express');
-const admin = require('firebase-admin');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { Pool } = require('pg'); // PostgreSQL client
 
 const app = express();
 
 // --- Middleware ---
 app.use(cors({ origin: 'http://localhost:5173' })); 
 app.use(express.json()); 
-app.set('trust proxy', true); // Necessary to get the correct IP address
+app.set('trust proxy', true);
 
-// --- Firebase Admin SDK Initialization ---
-const serviceAccount = require('./serviceAccountKey.json');
+// --- PostgreSQL Database Connection ---
+// UPDATE THIS LINE with your local database details
+const connectionString = 'postgres://tcal_user:admin123@localhost:5432/tcal_db';
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+const pool = new Pool({
+  connectionString,
 });
 
-const db = admin.firestore();
-const auth = admin.auth();
+// --- JWT Secret Key ---
+const JWT_SECRET = 'your-super-secret-key-that-should-be-long-and-random';
+
 
 // --- Authentication Middleware ---
-const authenticate = async (req, res, next) => {
+const authenticate = (req, res, next) => {
     const token = req.headers.authorization?.split('Bearer ')[1];
     if (!token) {
         return res.status(401).send({ error: 'Unauthorized: No token provided' });
     }
     try {
-        const decodedToken = await auth.verifyIdToken(token);
-        req.user = decodedToken;
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
         next();
     } catch (error) {
         res.status(401).send({ error: 'Unauthorized: Invalid token' });
@@ -46,140 +50,136 @@ app.post('/api/register', async (req, res) => {
         return res.status(400).send({ error: 'All fields are required.' });
     }
     try {
-        const userRecord = await auth.createUser({ email, password });
-        await db.collection('users').doc(userRecord.uid).set({
-            email: userRecord.email,
-            name: name,
-            surname: surname,
-            phone: phone,
-            isAdmin: false, 
-            allowedIp: null, // NEW: Initialize allowedIp field
-        });
-        res.status(201).send({ uid: userRecord.uid, message: 'User created successfully' });
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const result = await pool.query(
+            'INSERT INTO users (email, password_hash, name, surname, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+            [email, hashedPassword, name, surname, phone]
+        );
+        res.status(201).send({ id: result.rows[0].id, message: 'User created successfully' });
     } catch (error) {
-        res.status(400).send({ error: error.message });
+        console.error("Registration Error:", error);
+        if (error.code === '23505') {
+            return res.status(409).send({ error: 'An account with this email already exists.' });
+        }
+        res.status(500).send({ error: 'Failed to register user.' });
     }
 });
 
-// UPDATED: Record Login Activity and Check IP
-app.post('/api/login-activity', authenticate, async (req, res) => {
-    const { uid } = req.user;
-    const ip = req.ip; 
+// User Login
+app.post('/api/login', async (req, res) => {
+    const { email, password } = req.body;
+    const ip = req.ip;
     try {
-        const userDoc = await db.collection('users').doc(uid).get();
-        if (!userDoc.exists()) {
-            return res.status(404).send({ error: 'User not found in database' });
+        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        const user = result.rows[0];
+
+        if (!user) {
+            return res.status(401).send({ error: 'Invalid credentials' });
         }
-        const userData = userDoc.data();
-        
-        // IP Check Logic
-        if (userData.allowedIp && userData.allowedIp !== ip) {
+
+        const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+        if (!isPasswordValid) {
+            return res.status(401).send({ error: 'Invalid credentials' });
+        }
+
+        if (user.allowed_ip && user.allowed_ip !== ip) {
             return res.status(403).send({ error: 'Access from this IP address is not allowed.' });
         }
 
-        // If check passes, record the login activity
-        await db.collection('users').doc(uid).update({
-            lastLoginIp: ip,
-            lastLoginTime: admin.firestore.FieldValue.serverTimestamp()
-        });
-        res.status(200).send({ message: 'Login activity recorded' });
+        await pool.query('UPDATE users SET last_login_ip = $1 WHERE id = $2', [ip, user.id]);
+
+        const token = jwt.sign(
+            { id: user.id, isAdmin: user.is_admin, name: user.name, surname: user.surname },
+            JWT_SECRET,
+            { expiresIn: '1d' }
+        );
+
+        res.status(200).send({ token });
     } catch (error) {
-        res.status(500).send({ error: 'Failed to record login activity' });
+        console.error("Login Error:", error);
+        res.status(500).send({ error: 'Login failed.' });
     }
 });
 
-
-// Get all users from Firestore to include all data (admin only)
+// Get all users (admin only)
 app.get('/api/users', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
     try {
-        const usersSnapshot = await db.collection('users').get();
-        const users = usersSnapshot.docs.map(doc => ({
-            uid: doc.id,
-            ...doc.data()
-        }));
-        res.status(200).json(users);
+        const result = await pool.query('SELECT id, name, surname, email, last_login_ip, allowed_ip FROM users');
+        res.status(200).json(result.rows);
     } catch (error) {
-        res.status(500).send({ error: error.message });
+        console.error("Fetch Users Error:", error);
+        res.status(500).send({ error: 'Failed to fetch users.' });
     }
 });
 
 // Delete a user (admin only)
-app.delete('/api/users/:uid', authenticate, async (req, res) => {
-    const { uid } = req.params;
+app.delete('/api/users/:id', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
     try {
-        await auth.deleteUser(uid);
-        await db.collection('users').doc(uid).delete();
+        await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
         res.status(200).send({ message: 'User deleted successfully' });
     } catch (error) {
-        res.status(500).send({ error: error.message });
+        console.error("Delete User Error:", error);
+        res.status(500).send({ error: 'Failed to delete user.' });
     }
 });
 
-// --- NEW: Endpoint to set a user's allowed IP (admin only) ---
-app.post('/api/users/:uid/lock-ip', authenticate, async (req, res) => {
-    const requesterUid = req.user.uid;
-    const requesterDoc = await db.collection('users').doc(requesterUid).get();
-    if (!requesterDoc.exists() || !requesterDoc.data().isAdmin) {
-        return res.status(403).send({ error: 'Forbidden: Admin access required' });
-    }
-
-    const { uid } = req.params;
-    const { ipAddress } = req.body;
-
+// Set a user's allowed IP (admin only)
+app.post('/api/users/:id/lock-ip', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
     try {
-        await db.collection('users').doc(uid).update({
-            allowedIp: ipAddress || null // Store null if the IP address is cleared
-        });
+        await pool.query('UPDATE users SET allowed_ip = $1 WHERE id = $2', [req.body.ipAddress || null, req.params.id]);
         res.status(200).send({ message: 'IP lock updated successfully' });
     } catch (error) {
-        res.status(500).send({ error: 'Failed to update IP lock' });
+        console.error("Lock IP Error:", error);
+        res.status(500).send({ error: 'Failed to update IP lock.' });
     }
 });
-
 
 // --- Report Endpoints ---
 
 // Save a report
 app.post('/api/reports', authenticate, async (req, res) => {
-    const { uid } = req.user;
+    const userId = req.user.id;
     const { reportData, fileName } = req.body;
     try {
-        const report = {
-            data: reportData,
-            fileName: fileName,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-        await db.collection('users').doc(uid).collection('reports').add(report);
+        await pool.query(
+            'INSERT INTO reports (user_id, file_name, report_data) VALUES ($1, $2, $3)',
+            [userId, fileName, reportData]
+        );
         res.status(201).send({ message: 'Report saved successfully' });
     } catch (error) {
-        res.status(500).send({ error: error.message });
+        console.error("Save Report Error:", error);
+        res.status(500).send({ error: 'Failed to save report.' });
     }
 });
 
 // Get all reports for a user
 app.get('/api/reports', authenticate, async (req, res) => {
-    const { uid } = req.user;
+    const userId = req.user.id;
     try {
-        const reportsSnapshot = await db.collection('users').doc(uid).collection('reports').orderBy('createdAt', 'desc').get();
-        const reports = reportsSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
-        res.status(200).json(reports);
+        const result = await pool.query('SELECT * FROM reports WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
+        res.status(200).json(result.rows);
     } catch (error) {
-        res.status(500).send({ error: error.message });
+        console.error("Fetch Reports Error:", error);
+        res.status(500).send({ error: 'Failed to fetch reports.' });
     }
 });
 
 // Delete a specific report
-app.delete('/api/reports/:reportId', authenticate, async (req, res) => {
-    const { uid } = req.user;
-    const { reportId } = req.params;
+app.delete('/api/reports/:id', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const reportId = req.params.id;
     try {
-        await db.collection('users').doc(uid).collection('reports').doc(reportId).delete();
+        const result = await pool.query('DELETE FROM reports WHERE id = $1 AND user_id = $2', [reportId, userId]);
+        if (result.rowCount === 0) {
+            return res.status(404).send({ error: 'Report not found or not owned by user.' });
+        }
         res.status(200).send({ message: 'Report deleted successfully' });
     } catch (error) {
-        res.status(500).send({ error: 'Failed to delete report' });
+        console.error("Delete Report Error:", error);
+        res.status(500).send({ error: 'Failed to delete report.' });
     }
 });
 

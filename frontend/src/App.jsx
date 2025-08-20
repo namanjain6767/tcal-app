@@ -1,25 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import axios from 'axios';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signOut, onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, getDoc } from 'firebase/firestore';
-
-const firebaseConfig = {
-  apiKey: "AIzaSyCj1RfBO_-DnhFScif-_TPOkbOYSugaO3U",
-  authDomain: "timber-recorder-app.firebaseapp.com",
-  projectId: "timber-recorder-app",
-  storageBucket: "timber-recorder-app.appspot.com",
-  messagingSenderId: "85268585117",
-  appId: "1:85268585117:web:6af7b89a8e820164125274",
-  measurementId: "G-Q04Y9TNGG2"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+import { jwtDecode } from 'jwt-decode';
 
 const API_URL = 'http://localhost:5000/api';
+
+// --- Helper function to get the auth token from local storage ---
+const getAuthToken = () => localStorage.getItem('token');
+
+// --- Axios instance with auth header ---
+const api = axios.create({
+    baseURL: API_URL,
+    headers: {
+        'Content-Type': 'application/json',
+    },
+});
+
+api.interceptors.request.use(config => {
+    const token = getAuthToken();
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+});
+
 
 const GridButton = ({ value, group, onClick, isHighlighted, isSpecial, isDisabled }) => {
     const baseClasses = "w-full h-full flex items-center justify-center p-2 rounded-lg shadow-sm transition-all duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2";
@@ -51,36 +55,41 @@ export default function App() {
     const [page, setPage] = useState('login');
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-            if (currentUser) {
-                const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-                if (userDoc.exists()) {
-                    setUser({ uid: currentUser.uid, ...userDoc.data() });
-                }
+        const token = getAuthToken();
+        if (token) {
+            try {
+                const decodedUser = jwtDecode(token);
+                setUser(decodedUser);
                 setPage('app');
-            } else {
-                setUser(null);
+            } catch (e) {
+                localStorage.removeItem('token');
                 setPage('login');
             }
-        });
-        return () => unsubscribe();
+        } else {
+            setPage('login');
+        }
     }, []);
+
+    const handleLogout = () => {
+        localStorage.removeItem('token');
+        setUser(null);
+        setPage('login');
+    };
 
     const renderPage = () => {
         switch (page) {
-            case 'register': return <RegisterPage setPage={setPage} />;
-            case 'app': return <TimberRecorderPage user={user} setPage={setPage} />;
+            case 'register': return <RegisterPage setPage={setPage} setUser={setUser} />;
+            case 'app': return <TimberRecorderPage user={user} setPage={setPage} handleLogout={handleLogout} />;
             case 'admin': return <AdminPage setPage={setPage} />;
             case 'reports': return <ReportsPage setPage={setPage} />;
-            case 'login': default: return <LoginPage setPage={setPage} />;
+            case 'login': default: return <LoginPage setPage={setPage} setUser={setUser} />;
         }
     };
 
     return <div className="min-h-screen bg-gray-100">{renderPage()}</div>;
 }
 
-// --- UPDATED: Login Page with IP Check ---
-function LoginPage({ setPage }) {
+function LoginPage({ setPage, setUser }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -89,26 +98,14 @@ function LoginPage({ setPage }) {
         e.preventDefault();
         setError('');
         try {
-            const userCredential = await signInWithEmailAndPassword(auth, email, password);
-            const token = await userCredential.user.getIdToken();
-            
-            // IP check after login
-            try {
-                await axios.post(`${API_URL}/login-activity`, {}, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                // onAuthStateChanged will handle navigation
-            } catch (ipError) {
-                // If IP check fails, sign the user out immediately
-                await signOut(auth);
-                if (ipError.response && ipError.response.status === 403) {
-                    setError('Access from your current IP address is not allowed.');
-                } else {
-                    setError('An error occurred during login verification.');
-                }
-            }
+            const response = await axios.post(`${API_URL}/login`, { email, password });
+            const { token } = response.data;
+            localStorage.setItem('token', token);
+            const decodedUser = jwtDecode(token);
+            setUser(decodedUser);
+            setPage('app');
         } catch (err) {
-            setError('Failed to login. Please check your credentials.');
+            setError(err.response?.data?.error || 'Login failed.');
         }
     };
 
@@ -130,7 +127,7 @@ function LoginPage({ setPage }) {
     );
 }
 
-function RegisterPage({ setPage }) {
+function RegisterPage({ setPage, setUser }) {
     const [formData, setFormData] = useState({
         name: '',
         surname: '',
@@ -160,7 +157,12 @@ function RegisterPage({ setPage }) {
                 surname: formData.surname,
                 phone: formData.phone
             });
-            await signInWithEmailAndPassword(auth, formData.email, formData.password);
+            const response = await axios.post(`${API_URL}/login`, { email: formData.email, password: formData.password });
+            const { token } = response.data;
+            localStorage.setItem('token', token);
+            const decodedUser = jwtDecode(token);
+            setUser(decodedUser);
+            setPage('app');
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to register.');
         }
@@ -188,55 +190,40 @@ function RegisterPage({ setPage }) {
     );
 }
 
-// --- UPDATED: Admin Page with IP Locking ---
 function AdminPage({ setPage }) {
     const [users, setUsers] = useState([]);
 
     useEffect(() => {
         const fetchUsers = async () => {
-            if (auth.currentUser) {
-                try {
-                    const token = await auth.currentUser.getIdToken();
-                    const response = await axios.get(`${API_URL}/users`, {
-                        headers: { Authorization: `Bearer ${token}` }
-                    });
-                    setUsers(response.data);
-                } catch (error) {
-                    console.error("Failed to fetch users:", error);
-                }
+            try {
+                const response = await api.get('/users');
+                setUsers(response.data);
+            } catch (error) {
+                console.error("Failed to fetch users:", error);
             }
         };
         fetchUsers();
     }, []);
 
-    const handleDeleteUser = async (uid) => {
-        if (window.confirm("Are you sure you want to permanently delete this user? This action cannot be undone.")) {
+    const handleDeleteUser = async (id) => {
+        if (window.confirm("Are you sure you want to permanently delete this user?")) {
             try {
-                const token = await auth.currentUser.getIdToken();
-                await axios.delete(`${API_URL}/users/${uid}`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                setUsers(users.filter(user => user.uid !== uid));
+                await api.delete(`/users/${id}`);
+                setUsers(users.filter(user => user.id !== id));
             } catch (error) {
-                console.error("Failed to delete user:", error);
                 alert("Could not delete user.");
             }
         }
     };
 
-    // Sub-component for each user row to manage its own state
     const UserRow = ({ user }) => {
-        const [ipAddress, setIpAddress] = useState(user.allowedIp || '');
+        const [ipAddress, setIpAddress] = useState(user.allowed_ip || '');
 
         const handleSaveIp = async () => {
             try {
-                const token = await auth.currentUser.getIdToken();
-                await axios.post(`${API_URL}/users/${user.uid}/lock-ip`, { ipAddress }, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
+                await api.post(`/users/${user.id}/lock-ip`, { ipAddress });
                 alert('IP address updated!');
             } catch (error) {
-                console.error("Failed to save IP:", error);
                 alert("Failed to save IP address.");
             }
         };
@@ -245,7 +232,7 @@ function AdminPage({ setPage }) {
             <tr className="border-b">
                 <td className="p-2">{user.name} {user.surname}</td>
                 <td className="p-2">{user.email}</td>
-                <td className="p-2 font-mono">{user.lastLoginIp || 'N/A'}</td>
+                <td className="p-2 font-mono">{user.last_login_ip || 'N/A'}</td>
                 <td className="p-2 flex items-center gap-2">
                     <input 
                         type="text" 
@@ -257,7 +244,7 @@ function AdminPage({ setPage }) {
                     <button onClick={handleSaveIp} className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">Save IP</button>
                 </td>
                 <td className="p-2">
-                    <button onClick={() => handleDeleteUser(user.uid)} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
+                    <button onClick={() => handleDeleteUser(user.id)} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
                 </td>
             </tr>
         );
@@ -266,7 +253,7 @@ function AdminPage({ setPage }) {
     return (
         <div className="p-8 max-w-6xl mx-auto">
             <button onClick={() => setPage('app')} className="mb-6 p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back to App</button>
-            <h1 className="text-3xl font-bold mb-6">Admin Panel - Registered Users</h1>
+            <h1 className="text-3xl font-bold mb-6">Admin Panel</h1>
             <div className="bg-white p-6 rounded-lg shadow-md overflow-x-auto">
                 <table className="w-full text-left">
                     <thead>
@@ -279,7 +266,7 @@ function AdminPage({ setPage }) {
                         </tr>
                     </thead>
                     <tbody>
-                        {users.map(user => <UserRow key={user.uid} user={user} />)}
+                        {users.map(user => <UserRow key={user.id} user={user} />)}
                     </tbody>
                 </table>
             </div>
@@ -292,16 +279,11 @@ function ReportsPage({ setPage }) {
 
     useEffect(() => {
         const fetchReports = async () => {
-            if (auth.currentUser) {
-                try {
-                    const token = await auth.currentUser.getIdToken();
-                    const response = await axios.get(`${API_URL}/reports`, {
-                        headers: { Authorization: `Bearer ${token}` }
-                    });
-                    setReports(response.data);
-                } catch (error) {
-                    console.error("Failed to fetch reports:", error);
-                }
+            try {
+                const response = await api.get('/reports');
+                setReports(response.data);
+            } catch (error) {
+                console.error("Failed to fetch reports:", error);
             }
         };
         fetchReports();
@@ -317,13 +299,9 @@ function ReportsPage({ setPage }) {
     const handleDeleteReport = async (reportId) => {
         if (window.confirm("Are you sure you want to delete this report?")) {
             try {
-                const token = await auth.currentUser.getIdToken();
-                await axios.delete(`${API_URL}/reports/${reportId}`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
+                await api.delete(`/reports/${reportId}`);
                 setReports(reports.filter(report => report.id !== reportId));
             } catch (error) {
-                console.error("Failed to delete report:", error);
                 alert("Could not delete report.");
             }
         }
@@ -336,9 +314,9 @@ function ReportsPage({ setPage }) {
             <div className="bg-white p-6 rounded-lg shadow-md">
                 {reports.length > 0 ? reports.map(report => (
                     <div key={report.id} className="flex justify-between items-center p-2 border-b">
-                        <span>{report.fileName}</span>
+                        <span>{report.file_name}</span>
                         <div className="space-x-2">
-                            <button onClick={() => downloadReport(report.data, report.fileName)} className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700">Download</button>
+                            <button onClick={() => downloadReport(report.report_data, report.file_name)} className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700">Download</button>
                             <button onClick={() => handleDeleteReport(report.id)} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
                         </div>
                     </div>
@@ -348,8 +326,7 @@ function ReportsPage({ setPage }) {
     );
 }
 
-
-function TimberRecorderPage({ user, setPage }) {
+function TimberRecorderPage({ user, setPage, handleLogout }) {
     const thicknessData = [0.75, 1, 1.5, 2, 2.5, 3];
     const lengthData = [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75, 8, 8.25, 8.5, 8.75, 9, 9.25, 9.5, 9.75, 10, 10.25, 10.5, 10.75, 11, 11.25, 11.5, 11.75, 12, 12.25, 12.5, 12.75, 13, 13.25, 13.5, 13.75];
     const widthData = [
@@ -452,12 +429,9 @@ function TimberRecorderPage({ user, setPage }) {
             generateAndDownloadXLSX(recordedData, fileName);
 
             try {
-                const token = await auth.currentUser.getIdToken();
-                await axios.post(`${API_URL}/reports`, {
+                await api.post('/reports', {
                     reportData: recordedData,
                     fileName: fileName
-                }, {
-                    headers: { Authorization: `Bearer ${token}` }
                 });
             } catch (error) {
                 console.error("Failed to save report:", error);
@@ -483,7 +457,7 @@ function TimberRecorderPage({ user, setPage }) {
     };
 
     return (
-         <div className="bg-gray-50 text-gray-800 p-4 md-p-6 min-h-screen font-sans">
+         <div className="bg-gray-50 text-gray-800 p-4 md:p-6 min-h-screen font-sans">
             <div className="max-w-7xl mx-auto">
                 <div className="flex justify-between items-center mb-4">
                     <div>
@@ -492,7 +466,7 @@ function TimberRecorderPage({ user, setPage }) {
                     <div>
                         {user?.isAdmin && <button onClick={() => setPage('admin')} className="p-2 bg-purple-600 text-white rounded hover:bg-purple-700 mr-2">Admin Panel</button>}
                         <button onClick={() => setPage('reports')} className="p-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 mr-4">View Reports</button>
-                        <button onClick={() => signOut(auth)} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
+                        <button onClick={handleLogout} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
                     </div>
                 </div>
                 <div className="mb-6 p-4 bg-white rounded-lg shadow flex justify-between items-center">
