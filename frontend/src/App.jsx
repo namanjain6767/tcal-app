@@ -55,6 +55,7 @@ const GridButton = ({ value, group, onClick, isHighlighted, isSpecial, isDisable
 export default function App() {
     const [user, setUser] = useState(null);
     const [page, setPage] = useState('login');
+    const [activeDraft, setActiveDraft] = useState(null);
 
     useEffect(() => {
         const token = getAuthToken();
@@ -76,15 +77,17 @@ export default function App() {
         localStorage.removeItem('token');
         localStorage.removeItem('localDraft'); // Clear local draft on logout
         setUser(null);
+        setActiveDraft(null);
         setPage('login');
     };
 
     const renderPage = () => {
         switch (page) {
             case 'register': return <RegisterPage setPage={setPage} setUser={setUser} />;
-            case 'app': return <TimberRecorderPage user={user} setPage={setPage} handleLogout={handleLogout} />;
+            case 'app': return <TimberRecorderPage user={user} setPage={setPage} handleLogout={handleLogout} activeDraft={activeDraft} setActiveDraft={setActiveDraft} />;
             case 'admin': return <AdminPage setPage={setPage} />;
-            case 'reports': return <ReportsPage setPage={setPage} />;
+            case 'reports': return <ReportsPage setPage={setPage} setActiveDraft={setActiveDraft} />;
+            case 'drafts': return <DraftsPage setPage={setPage} setActiveDraft={setActiveDraft} />;
             case 'login': default: return <LoginPage setPage={setPage} setUser={setUser} />;
         }
     };
@@ -197,11 +200,16 @@ function AdminPage({ setPage }) {
     // ... (Admin page logic remains the same)
 }
 
-function ReportsPage({ setPage }) {
+function ReportsPage({ setPage, setActiveDraft }) {
     // ... (Reports page logic remains the same)
 }
 
-function TimberRecorderPage({ user, setPage, handleLogout }) {
+function DraftsPage({ setPage, setActiveDraft }) {
+    // ... (Drafts page logic remains the same)
+}
+
+
+function TimberRecorderPage({ user, setPage, handleLogout, activeDraft, setActiveDraft }) {
     const thicknessData = [0.75, 1, 1.5, 2, 2.5, 3];
     const lengthData = [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75, 8, 8.25, 8.5, 8.75, 9, 9.25, 9.5, 9.75, 10, 10.25, 10.5, 10.75, 11, 11.25, 11.5, 11.75, 12, 12.25, 12.5, 12.75, 13, 13.25, 13.5, 13.75];
     const widthData = [
@@ -217,11 +225,17 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
     const [useQuantity, setUseQuantity] = useState(false);
 
     useEffect(() => {
-        const savedDraft = localStorage.getItem('localDraft');
-        if (savedDraft) {
-            setRecordedData(JSON.parse(savedDraft));
+        if (activeDraft) {
+            setRecordedData(activeDraft.draft_data);
+        } else {
+            const localData = localStorage.getItem('localDraft');
+            if (localData) {
+                setRecordedData(JSON.parse(localData));
+            } else {
+                setRecordedData({});
+            }
         }
-    }, []);
+    }, [activeDraft]);
 
     const generateAndDownloadXLSX = (dataToExport, fileName) => {
         // ... (This function remains the same)
@@ -243,6 +257,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                 localStorage.setItem('localDraft', JSON.stringify(newData));
 
                 setSelections(prev => ({ ...prev, length: null, width: null }));
+                setQuantity(1); // UPDATED: Reset quantity after each entry
             }
             return;
         }
@@ -252,7 +267,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                 return;
             }
             
-            const fileName = `timber_record_${new Date().toISOString()}.xlsx`;
+            const fileName = activeDraft ? activeDraft.draft_name : `timber_record_${new Date().toISOString()}.xlsx`;
             
             generateAndDownloadXLSX(recordedData, fileName);
 
@@ -261,6 +276,10 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                     reportData: recordedData,
                     fileName: fileName
                 });
+                if (activeDraft) {
+                    await api.delete(`/drafts/${activeDraft.id}`);
+                    setActiveDraft(null);
+                }
             } catch (error) {
                 console.error("Failed to save report:", error);
             }
@@ -302,6 +321,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                     </div>
                     <div>
                         {user?.isAdmin && <button onClick={() => setPage('admin')} className="p-2 bg-purple-600 text-white rounded hover:bg-purple-700 mr-2">Admin Panel</button>}
+                        <button onClick={() => { setActiveDraft(null); setPage('drafts'); }} className="p-2 bg-teal-600 text-white rounded hover:bg-teal-700 mr-2">View Drafts</button>
                         <button onClick={() => setPage('reports')} className="p-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 mr-4">View Reports</button>
                         <button onClick={handleLogout} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
                     </div>
@@ -355,37 +375,6 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                                     ))}
                                 </div>
                             ))}
-                             <div className="mt-4">
-                                <div className="flex items-center justify-center">
-                                    <input
-                                        id="use-quantity"
-                                        type="checkbox"
-                                        checked={useQuantity}
-                                        onChange={(e) => setUseQuantity(e.target.checked)}
-                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                    />
-                                    <label htmlFor="use-quantity" className="ml-2 text-sm font-medium text-gray-700">Use Quantity</label>
-                                </div>
-                                {useQuantity && (
-                                    <div className="mt-2">
-                                        <div className="grid grid-cols-5 gap-2">
-                                            {Array.from({ length: 9 }, (_, i) => i + 2).map(num => (
-                                                <button
-                                                    key={`qty-${num}`}
-                                                    onClick={() => setQuantity(num)}
-                                                    className={`p-2 rounded-lg shadow-sm text-sm transition-all ${
-                                                        quantity === num
-                                                            ? 'bg-indigo-600 text-white ring-2 ring-indigo-400'
-                                                            : 'bg-white text-gray-700 hover:bg-gray-100'
-                                                    }`}
-                                                >
-                                                    {num}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
                         </div>
                     </div>
                     <div className="flex flex-col items-center space-y-4">
@@ -398,6 +387,37 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                                 isSpecial={true}
                                 isDisabled={!selections.length || !selections.width}
                             />
+                        </div>
+                        <div className="w-full mt-4">
+                            <div className="flex items-center justify-center">
+                                <input
+                                    id="use-quantity"
+                                    type="checkbox"
+                                    checked={useQuantity}
+                                    onChange={(e) => setUseQuantity(e.target.checked)}
+                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <label htmlFor="use-quantity" className="ml-2 text-sm font-medium text-gray-700">Use Quantity</label>
+                            </div>
+                            {useQuantity && (
+                                <div className="mt-2 space-y-2">
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {Array.from({ length: 9 }, (_, i) => i + 2).map(num => (
+                                            <button
+                                                key={`qty-${num}`}
+                                                onClick={() => setQuantity(num)}
+                                                className={`p-3 rounded-lg shadow-sm text-sm transition-all ${
+                                                    quantity === num
+                                                        ? 'bg-indigo-600 text-white ring-2 ring-indigo-400'
+                                                        : 'bg-white text-gray-700 hover:bg-gray-100'
+                                                }`}
+                                            >
+                                                {num}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
