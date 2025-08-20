@@ -3,7 +3,16 @@ import * as XLSX from 'xlsx';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
-const API_URL = 'http://localhost:5000/api';
+//const API_URL = 'http://localhost:5000/api';
+
+//LOCAL
+//const API_URL = 'http://localhost:5000/api';
+
+//const API_URL = 'http://localhost:5000/api';
+//const API_URL = 'http://192.168.29.252:5000/api'
+
+//PRODUCTION
+const API_URL = 'https://tcal-app-backend.onrender.com/api'
 
 // --- Helper function to get the auth token from local storage ---
 const getAuthToken = () => localStorage.getItem('token');
