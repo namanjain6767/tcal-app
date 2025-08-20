@@ -3,9 +3,11 @@ import * as XLSX from 'xlsx';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
+
 //const API_URL = 'http://localhost:5000/api';
 //const API_URL = 'http://192.168.29.252:5000/api'
 const API_URL = 'https://tcal-app-backend.onrender.com/api'
+
 
 // --- Helper function to get the auth token from local storage ---
 const getAuthToken = () => localStorage.getItem('token');
@@ -106,6 +108,7 @@ function DashboardPage({ setPage, handleLogout, user }) {
                 <h1 className="text-3xl font-bold">Dashboard</h1>
                 <div>
                     {user?.isAdmin && <button onClick={() => setPage('admin')} className="p-2 bg-purple-600 text-white rounded hover:bg-purple-700 mr-2">Admin Panel</button>}
+                    <button onClick={() => setPage('reports')} className="p-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 mr-4">View Reports</button>
                     <button onClick={handleLogout} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
                 </div>
             </div>
@@ -600,7 +603,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                     </div>
                 </div>
                 <div className="mb-6 p-4 bg-white rounded-lg shadow flex justify-between items-center">
-                    <h1 className="text-2xl font-bold text-gray-900">T-CAL</h1>
+                    <h1 className="text-2xl font-bold text-gray-900">TCAL</h1>
                     <div className="font-mono text-blue-600 text-lg">
                        T: {selections.thickness || '_'} | L: {selections.length || '_'} | W: {selections.width || '_'}
                     </div>
@@ -618,7 +621,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                         </select>
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Length(feet)</h2>
+                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Length(FEET)</h2>
                         <div className="grid grid-rows-13 grid-cols-4 gap-3">
                             {lengthData.map(value => (
                                 <GridButton
@@ -632,7 +635,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                         </div>
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Width(inch)</h2>
+                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Width(INCH)</h2>
                         <div className="space-y-3">
                             {widthData.map((row, rowIndex) => (
                                 <div key={`w-row-${rowIndex}`} className="grid grid-cols-3 gap-3">
