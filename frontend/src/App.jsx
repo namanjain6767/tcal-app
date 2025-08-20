@@ -600,7 +600,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                     </div>
                 </div>
                 <div className="mb-6 p-4 bg-white rounded-lg shadow flex justify-between items-center">
-                    <h1 className="text-2xl font-bold text-gray-900">TCAL</h1>
+                    <h1 className="text-2xl font-bold text-gray-900">T-CAL</h1>
                     <div className="font-mono text-blue-600 text-lg">
                        T: {selections.thickness || '_'} | L: {selections.length || '_'} | W: {selections.width || '_'}
                     </div>
@@ -618,7 +618,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                         </select>
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Length(FEET)</h2>
+                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Length(feet)</h2>
                         <div className="grid grid-rows-13 grid-cols-4 gap-3">
                             {lengthData.map(value => (
                                 <GridButton
@@ -632,7 +632,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                         </div>
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Width(INCH)</h2>
+                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Width(inch)</h2>
                         <div className="space-y-3">
                             {widthData.map((row, rowIndex) => (
                                 <div key={`w-row-${rowIndex}`} className="grid grid-cols-3 gap-3">
