@@ -92,7 +92,7 @@ export default function App() {
             case 'register': return <RegisterPage setPage={setPage} setUser={setUser} />;
             case 'app': return <TimberRecorderPage user={user} setPage={setPage} handleLogout={handleLogout} activeDraft={activeDraft} setActiveDraft={setActiveDraft} />;
             case 'admin': return <AdminPage setPage={setPage} />;
-            case 'reports': return <ReportsPage setPage={setPage} />;
+            case 'reports': return <ReportsPage setPage={setPage} setActiveDraft={setActiveDraft} />;
             case 'drafts': return <DraftsPage setPage={setPage} setActiveDraft={setActiveDraft} />;
             case 'login': default: return <LoginPage setPage={setPage} setUser={setUser} />;
         }
@@ -286,7 +286,7 @@ function AdminPage({ setPage }) {
     );
 }
 
-function ReportsPage({ setPage }) {
+function ReportsPage({ setPage, setActiveDraft }) {
     const [reports, setReports] = useState([]);
 
     useEffect(() => {
@@ -319,6 +319,15 @@ function ReportsPage({ setPage }) {
         }
     };
 
+    const handleLoadReport = (report) => {
+        const draftToLoad = {
+            draft_name: `Copy of ${report.file_name}`,
+            draft_data: report.report_data
+        };
+        setActiveDraft(draftToLoad);
+        setPage('app');
+    };
+
     return (
         <div className="p-8 max-w-4xl mx-auto">
             <button onClick={() => setPage('app')} className="mb-6 p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back to App</button>
@@ -328,6 +337,7 @@ function ReportsPage({ setPage }) {
                     <div key={report.id} className="flex justify-between items-center p-2 border-b">
                         <span>{report.file_name}</span>
                         <div className="space-x-2">
+                            <button onClick={() => handleLoadReport(report)} className="p-2 bg-teal-600 text-white rounded hover:bg-teal-700">Load</button>
                             <button onClick={() => downloadReport(report.report_data, report.file_name)} className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700">Download</button>
                             <button onClick={() => handleDeleteReport(report.id)} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
                         </div>
