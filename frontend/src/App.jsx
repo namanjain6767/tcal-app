@@ -407,10 +407,6 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
         setSelections({ thickness: newThickness, length: null, width: null });
     };
 
-    const handleQuantityChange = (event) => {
-        setQuantity(parseInt(event.target.value, 10));
-    };
-
     const handleButtonClick = async (value, group) => {
         if (value === 'Next') {
             if (selections.thickness && selections.length && selections.width) {
@@ -464,7 +460,6 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
         }
     };
 
-    // NEW: Function to reset the local draft
     const handleReset = () => {
         if (window.confirm("Are you sure you want to clear all current entries? This action cannot be undone.")) {
             localStorage.removeItem('localDraft');
@@ -550,7 +545,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                                     <div className="mt-2">
                                         <select
                                             value={quantity}
-                                            onChange={handleQuantityChange}
+                                            onChange={(e) => setQuantity(parseInt(e.target.value, 10))}
                                             className="w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                         >
                                             {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
@@ -588,7 +583,6 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                     >
                         Undo
                     </button>
-                    {/* NEW: Reset Button */}
                     <button 
                         onClick={handleReset} 
                         className="p-3 w-40 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold shadow-md transition-all"
