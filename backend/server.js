@@ -5,13 +5,16 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const XLSX = require('xlsx');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 
 // --- CORS Configuration ---
 const allowedOrigins = [
     'http://localhost:5173',
-    'https://astounding-liger-a7f504.netlify.app'
+    'https://astounding-liger-a7f504.netlify.app' // Your live Netlify URL
 ];
 
 app.use(cors({
@@ -26,6 +29,11 @@ app.use(cors({
 
 app.use(express.json()); 
 app.set('trust proxy', true);
+
+// --- Serve static files from the disk ---
+const reportsDirectory = '/var/data/reports';
+app.use('/reports', express.static(reportsDirectory));
+
 
 // --- PostgreSQL Database Connection ---
 const connectionString = process.env.DATABASE_URL;
@@ -46,16 +54,196 @@ const authenticate = (req, res, next) => {
     }
 };
 
+// --- Helper function to generate XLSX buffer ---
+const generateXLSXBuffer = (dataToExport) => {
+    const groupedByThickness = {};
+    for (const key in dataToExport) {
+        const [t, l, w] = key.split('-');
+        const count = dataToExport[key];
+        if (!groupedByThickness[t]) groupedByThickness[t] = {};
+        if (!groupedByThickness[t][l]) groupedByThickness[t][l] = {};
+        groupedByThickness[t][l][w] = count;
+    }
+    const wb = XLSX.utils.book_new();
+    for (const thickness in groupedByThickness) {
+        const sheetData = groupedByThickness[thickness];
+        const allLengths = Object.keys(sheetData).sort((a, b) => parseFloat(a) - parseFloat(b));
+        const allWidths = new Set();
+        allLengths.forEach(l => Object.keys(sheetData[l]).forEach(w => allWidths.add(w)));
+        const sortedWidths = Array.from(allWidths).sort((a, b) => parseFloat(a) - parseFloat(b));
+        const matrix = [['Length \\ Width', ...sortedWidths, 'Total', 'CFT']];
+        const colTotals = new Array(sortedWidths.length).fill(0);
+        let sheetTotalCFT = 0;
+        allLengths.forEach(length => {
+            let rowTotal = 0;
+            const row = [parseFloat(length)];
+            let weightedWidthSum = 0;
+            sortedWidths.forEach((width, index) => {
+                const count = sheetData[length][width] || 0;
+                row.push(count);
+                rowTotal += count;
+                colTotals[index] += count;
+                weightedWidthSum += parseFloat(width) * count;
+            });
+            row.push(rowTotal);
+            const rowCFT = (parseFloat(thickness) * parseFloat(length) * weightedWidthSum) / 144;
+            row.push(parseFloat(rowCFT.toFixed(4)));
+            sheetTotalCFT += rowCFT;
+            matrix.push(row);
+        });
+        const totalRow = ['Total'];
+        let grandTotal = 0;
+        colTotals.forEach(total => {
+            totalRow.push(total);
+            grandTotal += total;
+        });
+        totalRow.push(grandTotal);
+        totalRow.push(parseFloat(sheetTotalCFT.toFixed(4)));
+        matrix.push(totalRow);
+        const ws = XLSX.utils.aoa_to_sheet(matrix);
+        XLSX.utils.book_append_sheet(wb, ws, `Thickness ${thickness}`);
+    }
+    return XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
+};
+
+
 // --- API Endpoints ---
-// (User endpoints remain the same)
 
-// --- Report Endpoints ---
-// (Report endpoints remain the same)
+// User registration
+app.post('/api/register', async (req, res) => {
+    const { email, password, name, surname, phone } = req.body;
+    if (!email || !password || !name || !surname || !phone) {
+        return res.status(400).send({ error: 'All fields are required.' });
+    }
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const result = await pool.query(
+            'INSERT INTO users (email, password_hash, name, surname, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+            [email, hashedPassword, name, surname, phone]
+        );
+        res.status(201).send({ id: result.rows[0].id, message: 'User created successfully' });
+    } catch (error) {
+        console.error("Registration Error:", error);
+        if (error.code === '23505') {
+            return res.status(409).send({ error: 'An account with this email already exists.' });
+        }
+        res.status(500).send({ error: 'Failed to register user.' });
+    }
+});
+
+// User Login
+app.post('/api/login', async (req, res) => {
+    const { email, password } = req.body;
+    const ip = req.ip;
+    try {
+        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        const user = result.rows[0];
+
+        if (!user) {
+            return res.status(401).send({ error: 'Invalid credentials' });
+        }
+
+        const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+        if (!isPasswordValid) {
+            return res.status(401).send({ error: 'Invalid credentials' });
+        }
+
+        if (user.allowed_ip && user.allowed_ip !== ip) {
+            return res.status(403).send({ error: 'Access from this IP address is not allowed.' });
+        }
+
+        await pool.query('UPDATE users SET last_login_ip = $1 WHERE id = $2', [ip, user.id]);
+
+        const token = jwt.sign(
+            { id: user.id, isAdmin: user.is_admin, name: user.name, surname: user.surname },
+            JWT_SECRET,
+            { expiresIn: '1d' }
+        );
+
+        res.status(200).send({ token });
+    } catch (error) {
+        console.error("Login Error:", error);
+        res.status(500).send({ error: 'Login failed.' });
+    }
+});
+
+// Get all users (admin only)
+app.get('/api/users', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    try {
+        const result = await pool.query('SELECT id, name, surname, email, last_login_ip, allowed_ip FROM users');
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Users Error:", error);
+        res.status(500).send({ error: 'Failed to fetch users.' });
+    }
+});
+
+// Delete a user (admin only)
+app.delete('/api/users/:id', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    try {
+        await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+        res.status(200).send({ message: 'User deleted successfully' });
+    } catch (error) {
+        console.error("Delete User Error:", error);
+        res.status(500).send({ error: 'Failed to delete user.' });
+    }
+});
+
+// Set a user's allowed IP (admin only)
+app.post('/api/users/:id/lock-ip', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    try {
+        await pool.query('UPDATE users SET allowed_ip = $1 WHERE id = $2', [req.body.ipAddress || null, req.params.id]);
+        res.status(200).send({ message: 'IP lock updated successfully' });
+    } catch (error) {
+        console.error("Lock IP Error:", error);
+        res.status(500).send({ error: 'Failed to update IP lock.' });
+    }
+});
 
 
-// --- NEW: Draft Endpoints ---
+// Report Endpoints
+app.post('/api/reports', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { reportData, fileName } = req.body;
+    try {
+        await pool.query(
+            'INSERT INTO reports (user_id, file_name, report_data) VALUES ($1, $2, $3)',
+            [userId, fileName, reportData]
+        );
+        res.status(201).send({ message: 'Report saved successfully' });
+    } catch (error) {
+        console.error("Save Report Error:", error);
+        res.status(500).send({ error: 'Failed to save report.' });
+    }
+});
 
-// Get all drafts for a user
+app.get('/api/reports', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    try {
+        const result = await pool.query('SELECT * FROM reports WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Reports Error:", error);
+        res.status(500).send({ error: 'Failed to fetch reports.' });
+    }
+});
+
+app.delete('/api/reports/:id', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const reportId = req.params.id;
+    try {
+        await pool.query('DELETE FROM reports WHERE id = $1 AND user_id = $2', [reportId, userId]);
+        res.status(200).send({ message: 'Report deleted successfully' });
+    } catch (error) {
+        console.error("Delete Report Error:", error);
+        res.status(500).send({ error: 'Failed to delete report.' });
+    }
+});
+
+// Draft Endpoints
 app.get('/api/drafts', authenticate, async (req, res) => {
     const userId = req.user.id;
     try {
@@ -67,12 +255,10 @@ app.get('/api/drafts', authenticate, async (req, res) => {
     }
 });
 
-// Create a new draft with a custom name
 app.post('/api/drafts', authenticate, async (req, res) => {
     const userId = req.user.id;
     const { draftData } = req.body;
     try {
-        // Logic to generate the custom, incrementing draft name
         const today = new Date();
         const dateStr = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}-${today.getFullYear()}`;
         
@@ -97,7 +283,6 @@ app.post('/api/drafts', authenticate, async (req, res) => {
     }
 });
 
-// Update an existing draft
 app.put('/api/drafts/:id', authenticate, async (req, res) => {
     const userId = req.user.id;
     const draftId = req.params.id;
@@ -117,7 +302,6 @@ app.put('/api/drafts/:id', authenticate, async (req, res) => {
     }
 });
 
-// Delete a draft
 app.delete('/api/drafts/:id', authenticate, async (req, res) => {
     const userId = req.user.id;
     const draftId = req.params.id;
