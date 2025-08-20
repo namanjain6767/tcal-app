@@ -464,6 +464,15 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
         }
     };
 
+    // NEW: Function to reset the local draft
+    const handleReset = () => {
+        if (window.confirm("Are you sure you want to clear all current entries? This action cannot be undone.")) {
+            localStorage.removeItem('localDraft');
+            setRecordedData({});
+            alert("Current session has been cleared.");
+        }
+    };
+
     return (
          <div className="bg-gray-50 text-gray-800 p-4 md:p-6 min-h-screen font-sans">
             <div className="max-w-7xl mx-auto">
@@ -578,6 +587,13 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                         className="p-3 w-40 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 font-semibold shadow-md transition-all"
                     >
                         Undo
+                    </button>
+                    {/* NEW: Reset Button */}
+                    <button 
+                        onClick={handleReset} 
+                        className="p-3 w-40 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold shadow-md transition-all"
+                    >
+                        Reset
                     </button>
                 </div>
             </div>
