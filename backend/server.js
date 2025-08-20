@@ -11,22 +11,19 @@ const path = require('path');
 
 const app = express();
 
-// --- UPDATED: CORS Configuration ---
-// A list of all the web addresses that are allowed to talk to your server.
+// --- CORS Configuration ---
 const allowedOrigins = [
-    'http://localhost:5173', // Your local frontend for development
-    'https://astounding-liger-a7f504.netlify.app' // Your live Netlify frontend
+    'http://localhost:5173',
+    'https://astounding-liger-a7f504.netlify.app'
 ];
 
 app.use(cors({
     origin: function (origin, callback) {
-        // allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
-            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
         }
-        return callback(null, true);
     }
 }));
 
@@ -35,9 +32,6 @@ app.set('trust proxy', true);
 
 // --- Serve static files from the disk ---
 const reportsDirectory = '/var/data/reports';
-if (!fs.existsSync(reportsDirectory)) {
-    fs.mkdirSync(reportsDirectory, { recursive: true });
-}
 app.use('/reports', express.static(reportsDirectory));
 
 
