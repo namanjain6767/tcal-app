@@ -108,9 +108,103 @@ const generateXLSXBuffer = (dataToExport) => {
 
 
 // --- API Endpoints ---
-// (User endpoints remain the same)
 
-// --- UPDATED: Report Endpoints ---
+// User registration
+app.post('/api/register', async (req, res) => {
+    const { email, password, name, surname, phone } = req.body;
+    if (!email || !password || !name || !surname || !phone) {
+        return res.status(400).send({ error: 'All fields are required.' });
+    }
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const result = await pool.query(
+            'INSERT INTO users (email, password_hash, name, surname, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+            [email, hashedPassword, name, surname, phone]
+        );
+        res.status(201).send({ id: result.rows[0].id, message: 'User created successfully' });
+    } catch (error) {
+        console.error("Registration Error:", error);
+        if (error.code === '23505') {
+            return res.status(409).send({ error: 'An account with this email already exists.' });
+        }
+        res.status(500).send({ error: 'Failed to register user.' });
+    }
+});
+
+// User Login
+app.post('/api/login', async (req, res) => {
+    const { email, password } = req.body;
+    const ip = req.ip;
+    try {
+        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        const user = result.rows[0];
+
+        if (!user) {
+            return res.status(401).send({ error: 'Invalid credentials' });
+        }
+
+        const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+        if (!isPasswordValid) {
+            return res.status(401).send({ error: 'Invalid credentials' });
+        }
+
+        if (user.allowed_ip && user.allowed_ip !== ip) {
+            return res.status(403).send({ error: 'Access from this IP address is not allowed.' });
+        }
+
+        await pool.query('UPDATE users SET last_login_ip = $1 WHERE id = $2', [ip, user.id]);
+
+        const token = jwt.sign(
+            { id: user.id, isAdmin: user.is_admin, name: user.name, surname: user.surname },
+            JWT_SECRET,
+            { expiresIn: '1d' }
+        );
+
+        res.status(200).send({ token });
+    } catch (error) {
+        console.error("Login Error:", error);
+        res.status(500).send({ error: 'Login failed.' });
+    }
+});
+
+// Get all users (admin only)
+app.get('/api/users', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    try {
+        const result = await pool.query('SELECT id, name, surname, email, last_login_ip, allowed_ip FROM users');
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Users Error:", error);
+        res.status(500).send({ error: 'Failed to fetch users.' });
+    }
+});
+
+// Delete a user (admin only)
+app.delete('/api/users/:id', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    try {
+        await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+        res.status(200).send({ message: 'User deleted successfully' });
+    } catch (error) {
+        console.error("Delete User Error:", error);
+        res.status(500).send({ error: 'Failed to delete user.' });
+    }
+});
+
+// Set a user's allowed IP (admin only)
+app.post('/api/users/:id/lock-ip', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    try {
+        await pool.query('UPDATE users SET allowed_ip = $1 WHERE id = $2', [req.body.ipAddress || null, req.params.id]);
+        res.status(200).send({ message: 'IP lock updated successfully' });
+    } catch (error) {
+        console.error("Lock IP Error:", error);
+        res.status(500).send({ error: 'Failed to update IP lock.' });
+    }
+});
+
+
+// Report Endpoints
 app.post('/api/reports', authenticate, async (req, res) => {
     const userId = req.user.id;
     const { reportData, fileName } = req.body;
