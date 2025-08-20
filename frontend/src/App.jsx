@@ -215,7 +215,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
 
     const [selections, setSelections] = useState({ thickness: thicknessData[0], length: null, width: null });
     const [recordedData, setRecordedData] = useState({});
-    const [rejectedData, setRejectedData] = useState({}); // NEW: State for rejected items
+    const [rejectedData, setRejectedData] = useState({});
     const [quantity, setQuantity] = useState(1);
     const [useQuantity, setUseQuantity] = useState(false);
 
@@ -230,6 +230,47 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
     const generateAndDownloadXLSX = (acceptedData, rejectedData, fileName) => {
         const wb = XLSX.utils.book_new();
 
+        const processSheetData = (data, thickness) => {
+            const sheetData = data;
+            const allLengths = Object.keys(sheetData).sort((a, b) => parseFloat(a) - parseFloat(b));
+            const allWidths = new Set();
+            allLengths.forEach(l => Object.keys(sheetData[l]).forEach(w => allWidths.add(w)));
+            const sortedWidths = Array.from(allWidths).sort((a, b) => parseFloat(a) - parseFloat(b));
+            const matrix = [['Length \\ Width', ...sortedWidths, 'Total', 'CFT']];
+            const colTotals = new Array(sortedWidths.length).fill(0);
+            let sheetTotalCFT = 0;
+
+            allLengths.forEach(length => {
+                let rowTotal = 0;
+                const row = [parseFloat(length)];
+                let weightedWidthSum = 0;
+                sortedWidths.forEach((width, index) => {
+                    const count = sheetData[length]?.[width] || 0;
+                    row.push(count);
+                    rowTotal += count;
+                    colTotals[index] += count;
+                    weightedWidthSum += parseFloat(width) * count;
+                });
+                row.push(rowTotal);
+                const rowCFT = (parseFloat(thickness) * parseFloat(length) * weightedWidthSum) / 144;
+                row.push(parseFloat(rowCFT.toFixed(4)));
+                sheetTotalCFT += rowCFT;
+                matrix.push(row);
+            });
+
+            const totalRow = ['Total'];
+            let grandTotal = 0;
+            colTotals.forEach(total => {
+                totalRow.push(total);
+                grandTotal += total;
+            });
+            totalRow.push(grandTotal);
+            totalRow.push(parseFloat(sheetTotalCFT.toFixed(4)));
+            matrix.push(totalRow);
+            
+            return matrix;
+        };
+
         // Process accepted data
         const groupedByThickness = {};
         for (const key in acceptedData) {
@@ -240,26 +281,26 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
             groupedByThickness[t][l][w] = count;
         }
         for (const thickness in groupedByThickness) {
-            const sheetData = groupedByThickness[thickness];
-            const allLengths = Object.keys(sheetData).sort((a, b) => parseFloat(a) - parseFloat(b));
-            const allWidths = new Set();
-            allLengths.forEach(l => Object.keys(sheetData[l]).forEach(w => allWidths.add(w)));
-            const sortedWidths = Array.from(allWidths).sort((a, b) => parseFloat(a) - parseFloat(b));
-            const matrix = [['Length \\ Width', ...sortedWidths, 'Total', 'CFT']];
-            // ... (rest of matrix generation logic)
+            const matrix = processSheetData(groupedByThickness[thickness], thickness);
             const ws = XLSX.utils.aoa_to_sheet(matrix);
             XLSX.utils.book_append_sheet(wb, ws, `Thickness ${thickness}`);
         }
 
         // Process rejected data
         if (Object.keys(rejectedData).length > 0) {
-            const rejectedMatrix = [['Thickness', 'Length', 'Width', 'Count']];
+            const rejectedGrouped = {};
             for (const key in rejectedData) {
                 const [t, l, w] = key.split('-');
-                rejectedMatrix.push([t, l, w, rejectedData[key]]);
+                const count = rejectedData[key];
+                if (!rejectedGrouped[t]) rejectedGrouped[t] = {};
+                if (!rejectedGrouped[t][l]) rejectedGrouped[t][l] = {};
+                rejectedGrouped[t][l][w] = count;
             }
-            const ws = XLSX.utils.aoa_to_sheet(rejectedMatrix);
-            XLSX.utils.book_append_sheet(wb, ws, "Rejected");
+            for (const thickness in rejectedGrouped) {
+                 const matrix = processSheetData(rejectedGrouped[thickness], thickness);
+                 const ws = XLSX.utils.aoa_to_sheet(matrix);
+                 XLSX.utils.book_append_sheet(wb, ws, `Rejected ${thickness}`);
+            }
         }
         
         XLSX.writeFile(wb, fileName);
@@ -302,7 +343,6 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
             generateAndDownloadXLSX(recordedData, rejectedData, fileName);
 
             try {
-                // You might want to save both accepted and rejected data
                 await api.post('/reports', {
                     reportData: { accepted: recordedData, rejected: rejectedData },
                     fileName: fileName
@@ -449,7 +489,6 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                                 isDisabled={!selections.length || !selections.width}
                             />
                         </div>
-                        {/* NEW: Reject Button */}
                         <div className="w-full">
                             <GridButton
                                 value="Reject"
