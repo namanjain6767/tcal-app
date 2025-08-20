@@ -3,16 +3,7 @@ import * as XLSX from 'xlsx';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
-
-//LOCAL
-//const API_URL = 'http://localhost:5000/api';
-
-//const API_URL = 'http://localhost:5000/api';
-//const API_URL = 'http://192.168.29.252:5000/api'
-
-//PRODUCTION
-const API_URL = 'https://tcal-app-backend.onrender.com/api'
-
+const API_URL = 'http://localhost:5000/api';
 
 // --- Helper function to get the auth token from local storage ---
 const getAuthToken = () => localStorage.getItem('token');
@@ -378,7 +369,103 @@ function TimberRecorderPage({ user, setPage, handleLogout, activeDraft, setActiv
                     </div>
                     <div className="w-16"></div> 
                 </div>
-                {/* ... (Rest of the Timber Recorder UI remains the same) ... */}
+                {/* --- RESTORED UI CODE --- */}
+                <div className="grid gap-4 grid-cols-1 md:grid-cols-[1fr_4fr_3fr_2fr]">
+                    <div>
+                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">THICKNESS</h2>
+                        <select
+                            value={selections.thickness}
+                            onChange={handleThicknessChange}
+                            className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                            {thicknessData.map(value => <option key={`t-opt-${value}`} value={value}>{value}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Length(FEET)</h2>
+                        <div className="grid grid-rows-13 grid-cols-4 gap-3">
+                            {lengthData.map(value => (
+                                <GridButton
+                                    key={`len-${value}`}
+                                    value={value}
+                                    group="length"
+                                    onClick={handleButtonClick}
+                                    isHighlighted={selections.length === value}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Width(INCH)</h2>
+                        <div className="space-y-3">
+                            {widthData.map((row, rowIndex) => (
+                                <div key={`w-row-${rowIndex}`} className="grid grid-cols-3 gap-3">
+                                    {row.map(value => (
+                                        <GridButton
+                                            key={`w-${value}`}
+                                            value={value}
+                                            group="width"
+                                            onClick={handleButtonClick}
+                                            isHighlighted={selections.width === value}
+                                            isDisabled={!selections.length}
+                                        />
+                                    ))}
+                                </div>
+                            ))}
+                             <div className="mt-4">
+                                <div className="flex items-center justify-center">
+                                    <input
+                                        id="use-quantity"
+                                        type="checkbox"
+                                        checked={useQuantity}
+                                        onChange={(e) => setUseQuantity(e.target.checked)}
+                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <label htmlFor="use-quantity" className="ml-2 text-sm font-medium text-gray-700">Use Quantity</label>
+                                </div>
+                                {useQuantity && (
+                                    <div className="mt-2">
+                                        <select
+                                            value={quantity}
+                                            onChange={handleQuantityChange}
+                                            className="w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+                                                <option key={`qty-${num}`} value={num}>{num}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex flex-col items-center space-y-4">
+                        <h2 className="text-lg font-semibold mb-2 text-center text-transparent">Actions</h2>
+                        <div className="w-full">
+                            <GridButton
+                                value="Next"
+                                group="action"
+                                onClick={handleButtonClick}
+                                isSpecial={true}
+                                isDisabled={!selections.length || !selections.width}
+                            />
+                        </div>
+                    </div>
+                </div>
+                 <div className="mt-6 flex justify-center items-center gap-4">
+                    <button 
+                        onClick={() => handleButtonClick('Finish', 'action')} 
+                        className="p-3 w-40 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold shadow-md transition-all"
+                    >
+                        Finish
+                    </button>
+                    <button 
+                        onClick={() => handleButtonClick('Undo', 'action')} 
+                        className="p-3 w-40 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 font-semibold shadow-md transition-all"
+                    >
+                        Undo
+                    </button>
+                </div>
             </div>
         </div>
     );
