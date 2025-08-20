@@ -9,20 +9,25 @@ const { Pool } = require('pg'); // PostgreSQL client
 const app = express();
 
 // --- Middleware ---
-app.use(cors({ origin: 'http://localhost:5173' })); 
+//app.use(cors({ origin: 'http://localhost:5173' })); 
+//app.use(cors({ origin: 'http://192.168.29.252:5173' })); 
+
+app.use(cors({ origin: 'http://192.168.1.24:5173' })); 
+
+//app.use(cors({ origin: allowedOrigins }));
 app.use(express.json()); 
 app.set('trust proxy', true);
 
 // --- PostgreSQL Database Connection ---
 // UPDATE THIS LINE with your local database details
-const connectionString = 'postgres://tcal_user:admin123@localhost:5432/tcal_db';
+const connectionString = process.env.DATABASE_URL;
 
 const pool = new Pool({
   connectionString,
 });
 
 // --- JWT Secret Key ---
-const JWT_SECRET = 'your-super-secret-key-that-should-be-long-and-random';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 
 // --- Authentication Middleware ---
