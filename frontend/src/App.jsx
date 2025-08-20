@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
-//const API_URL = 'http://localhost:5000/api';
-//const API_URL = 'http://192.168.29.252:5000/api'
-const API_URL = 'https://tcal-app-backend.onrender.com/api'
+const API_URL = 'http://localhost:5000/api';
 
 // --- Helper function to get the auth token from local storage ---
 const getAuthToken = () => localStorage.getItem('token');
@@ -55,7 +53,6 @@ const GridButton = ({ value, group, onClick, isHighlighted, isSpecial, isDisable
 export default function App() {
     const [user, setUser] = useState(null);
     const [page, setPage] = useState('login');
-    const [activeDraft, setActiveDraft] = useState(null);
 
     useEffect(() => {
         const token = getAuthToken();
@@ -77,17 +74,15 @@ export default function App() {
         localStorage.removeItem('token');
         localStorage.removeItem('localDraft'); // Clear local draft on logout
         setUser(null);
-        setActiveDraft(null);
         setPage('login');
     };
 
     const renderPage = () => {
         switch (page) {
             case 'register': return <RegisterPage setPage={setPage} setUser={setUser} />;
-            case 'app': return <TimberRecorderPage user={user} setPage={setPage} handleLogout={handleLogout} activeDraft={activeDraft} setActiveDraft={setActiveDraft} />;
+            case 'app': return <TimberRecorderPage user={user} setPage={setPage} handleLogout={handleLogout} />;
             case 'admin': return <AdminPage setPage={setPage} />;
-            case 'reports': return <ReportsPage setPage={setPage} setActiveDraft={setActiveDraft} />;
-            case 'drafts': return <DraftsPage setPage={setPage} setActiveDraft={setActiveDraft} />;
+            case 'reports': return <ReportsPage setPage={setPage} />;
             case 'login': default: return <LoginPage setPage={setPage} setUser={setUser} />;
         }
     };
@@ -200,62 +195,11 @@ function AdminPage({ setPage }) {
     // ... (Admin page logic remains the same)
 }
 
-function ReportsPage({ setPage, setActiveDraft }) {
+function ReportsPage({ setPage }) {
     // ... (Reports page logic remains the same)
 }
 
-function DraftsPage({ setPage, setActiveDraft }) {
-    const [drafts, setDrafts] = useState([]);
-
-    useEffect(() => {
-        const fetchDrafts = async () => {
-            try {
-                const response = await api.get('/drafts');
-                setDrafts(response.data);
-            } catch (error) {
-                console.error("Failed to fetch drafts:", error);
-            }
-        };
-        fetchDrafts();
-    }, []);
-
-    const handleLoadDraft = (draft) => {
-        setActiveDraft(draft);
-        setPage('app');
-    };
-
-    const handleDeleteDraft = async (draftId) => {
-        if (window.confirm("Are you sure you want to delete this draft?")) {
-            try {
-                await api.delete(`/drafts/${draftId}`);
-                setDrafts(drafts.filter(draft => draft.id !== draftId));
-            } catch (error) {
-                alert("Could not delete draft.");
-            }
-        }
-    };
-
-    return (
-        <div className="p-8 max-w-4xl mx-auto">
-            <button onClick={() => { setActiveDraft(null); setPage('app'); }} className="mb-6 p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back to App</button>
-            <h1 className="text-3xl font-bold mb-6">Saved Drafts</h1>
-            <div className="bg-white p-6 rounded-lg shadow-md">
-                {drafts.length > 0 ? drafts.map(draft => (
-                    <div key={draft.id} className="flex justify-between items-center p-2 border-b">
-                        <span>{draft.draft_name}</span>
-                        <div className="space-x-2">
-                            <button onClick={() => handleLoadDraft(draft)} className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700">Load</button>
-                            <button onClick={() => handleDeleteDraft(draft.id)} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
-                        </div>
-                    </div>
-                )) : <p>No drafts saved yet.</p>}
-            </div>
-        </div>
-    );
-}
-
-
-function TimberRecorderPage({ user, setPage, handleLogout, activeDraft, setActiveDraft }) {
+function TimberRecorderPage({ user, setPage, handleLogout }) {
     const thicknessData = [0.75, 1, 1.5, 2, 2.5, 3];
     const lengthData = [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75, 8, 8.25, 8.5, 8.75, 9, 9.25, 9.5, 9.75, 10, 10.25, 10.5, 10.75, 11, 11.25, 11.5, 11.75, 12, 12.25, 12.5, 12.75, 13, 13.25, 13.5, 13.75];
     const widthData = [
@@ -269,48 +213,13 @@ function TimberRecorderPage({ user, setPage, handleLogout, activeDraft, setActiv
     const [recordedData, setRecordedData] = useState({});
     const [quantity, setQuantity] = useState(1);
     const [useQuantity, setUseQuantity] = useState(false);
-    const recordedDataRef = useRef(recordedData);
-    const activeDraftRef = useRef(activeDraft);
 
     useEffect(() => {
-        recordedDataRef.current = recordedData;
-        activeDraftRef.current = activeDraft;
-    }, [recordedData, activeDraft]);
-
-    useEffect(() => {
-        if (activeDraft) {
-            setRecordedData(activeDraft.draft_data);
-            localStorage.setItem('localDraft', JSON.stringify(activeDraft.draft_data));
-        } else {
-            const localData = localStorage.getItem('localDraft');
-            if (localData) {
-                setRecordedData(JSON.parse(localData));
-            } else {
-                setRecordedData({});
-            }
+        const savedDraft = localStorage.getItem('localDraft');
+        if (savedDraft) {
+            setRecordedData(JSON.parse(savedDraft));
         }
-
-        // Background sync interval
-        const interval = setInterval(() => {
-            const localDataStr = localStorage.getItem('localDraft');
-            if (localDataStr) {
-                const localData = JSON.parse(localDataStr);
-                const currentDraft = activeDraftRef.current;
-
-                if (currentDraft) {
-                    // If draft exists, update it
-                    api.put(`/drafts/${currentDraft.id}`, { draftData: localData });
-                } else if (Object.keys(localData).length > 0) {
-                    // If no draft exists and there's local data, create a new draft
-                    api.post('/drafts', { draftData: localData }).then(response => {
-                        setActiveDraft(response.data);
-                    });
-                }
-            }
-        }, 10000); // Sync every 10 seconds
-
-        return () => clearInterval(interval); // Cleanup on unmount
-    }, [activeDraft, setActiveDraft]);
+    }, []);
 
     const generateAndDownloadXLSX = (dataToExport, fileName) => {
         // ... (This function remains the same)
@@ -345,7 +254,7 @@ function TimberRecorderPage({ user, setPage, handleLogout, activeDraft, setActiv
                 return;
             }
             
-            const fileName = activeDraft ? activeDraft.draft_name : `timber_record_${new Date().toISOString()}.xlsx`;
+            const fileName = `timber_record_${new Date().toISOString()}.xlsx`;
             
             generateAndDownloadXLSX(recordedData, fileName);
 
@@ -354,16 +263,12 @@ function TimberRecorderPage({ user, setPage, handleLogout, activeDraft, setActiv
                     reportData: recordedData,
                     fileName: fileName
                 });
-                if (activeDraft) {
-                    await api.delete(`/drafts/${activeDraft.id}`);
-                }
             } catch (error) {
                 console.error("Failed to save report:", error);
             }
 
             localStorage.removeItem('localDraft');
             setRecordedData({});
-            setActiveDraft(null);
             return;
         }
         if (value === 'Undo') {
@@ -391,7 +296,6 @@ function TimberRecorderPage({ user, setPage, handleLogout, activeDraft, setActiv
                     </div>
                     <div>
                         {user?.isAdmin && <button onClick={() => setPage('admin')} className="p-2 bg-purple-600 text-white rounded hover:bg-purple-700 mr-2">Admin Panel</button>}
-                        <button onClick={() => { setActiveDraft(null); setPage('drafts'); }} className="p-2 bg-teal-600 text-white rounded hover:bg-teal-700 mr-2">View Drafts</button>
                         <button onClick={() => setPage('reports')} className="p-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 mr-4">View Reports</button>
                         <button onClick={handleLogout} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
                     </div>
