@@ -3,11 +3,9 @@ import * as XLSX from 'xlsx';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
-
 //const API_URL = 'http://localhost:5000/api';
 //const API_URL = 'http://192.168.29.252:5000/api'
 const API_URL = 'https://tcal-app-backend.onrender.com/api'
-
 
 // --- Helper function to get the auth token from local storage ---
 const getAuthToken = () => localStorage.getItem('token');
@@ -93,6 +91,8 @@ export default function App() {
             case 'admin': return <AdminPage setPage={setPage} />;
             case 'reports': return <ReportsPage setPage={setPage} />;
             case 'login': default: return <LoginPage setPage={setPage} setUser={setUser} />;
+            case 'singleLength': return <SingleLengthCounter setPage={setPage} handleLogout={handleLogout} user={user} />;
+
         }
     };
 
@@ -130,7 +130,7 @@ function InwardPage({ setPage, handleLogout, user }) {
              <div className="flex justify-between items-center mb-8">
                 <h1 className="text-3xl font-bold">Inward</h1>
                 <div>
-                    <button onClick={() => setPage('dashboard')} className="p-2 bg-gray-500 text-white rounded hover:bg-gray-600 mr-4">Back to Dashboard</button>
+                    <button onClick={() => setPage('singleLength')} className="p-12 bg-cyan-500 text-white text-2xl font-bold rounded-lg shadow-lg hover:bg-cyan-600 transition-all">Single Length</button>
                     {user?.isAdmin && <button onClick={() => setPage('admin')} className="p-2 bg-purple-600 text-white rounded hover:bg-purple-700 mr-2">Admin Panel</button>}
                     <button onClick={handleLogout} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
                 </div>
