@@ -3,7 +3,6 @@ import * as XLSX from 'xlsx';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
-
 //LOCAL
 //const API_URL = 'http://localhost:5000/api';
 
@@ -12,6 +11,7 @@ import { jwtDecode } from 'jwt-decode';
 
 //PRODUCTION
 const API_URL = 'https://tcal-app-backend.onrender.com/api'
+
 
 
 // --- Helper function to get the auth token from local storage ---
@@ -283,6 +283,7 @@ function AdminPage({ setPage }) {
     );
 }
 
+// --- UPDATED: Reports Page ---
 function ReportsPage({ setPage }) {
     const [reports, setReports] = useState([]);
 
@@ -298,10 +299,55 @@ function ReportsPage({ setPage }) {
         fetchReports();
     }, []);
 
+    // This function is now the same as the one on the main page
     const downloadReport = (reportData, fileName) => {
+        const groupedByThickness = {};
+        for (const key in reportData) {
+            const [t, l, w] = key.split('-');
+            const count = reportData[key];
+            if (!groupedByThickness[t]) groupedByThickness[t] = {};
+            if (!groupedByThickness[t][l]) groupedByThickness[t][l] = {};
+            groupedByThickness[t][l][w] = count;
+        }
         const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.json_to_sheet(Object.entries(reportData).map(([key, count]) => ({ Combination: key, Count: count })));
-        XLSX.utils.book_append_sheet(wb, ws, "Report");
+        for (const thickness in groupedByThickness) {
+            const sheetData = groupedByThickness[thickness];
+            const allLengths = Object.keys(sheetData).sort((a, b) => parseFloat(a) - parseFloat(b));
+            const allWidths = new Set();
+            allLengths.forEach(l => Object.keys(sheetData[l]).forEach(w => allWidths.add(w)));
+            const sortedWidths = Array.from(allWidths).sort((a, b) => parseFloat(a) - parseFloat(b));
+            const matrix = [['Length \\ Width', ...sortedWidths, 'Total', 'CFT']];
+            const colTotals = new Array(sortedWidths.length).fill(0);
+            let sheetTotalCFT = 0;
+            allLengths.forEach(length => {
+                let rowTotal = 0;
+                const row = [parseFloat(length)];
+                let weightedWidthSum = 0;
+                sortedWidths.forEach((width, index) => {
+                    const count = sheetData[length][width] || 0;
+                    row.push(count);
+                    rowTotal += count;
+                    colTotals[index] += count;
+                    weightedWidthSum += parseFloat(width) * count;
+                });
+                row.push(rowTotal);
+                const rowCFT = (parseFloat(thickness) * parseFloat(length) * weightedWidthSum) / 144;
+                row.push(parseFloat(rowCFT.toFixed(4)));
+                sheetTotalCFT += rowCFT;
+                matrix.push(row);
+            });
+            const totalRow = ['Total'];
+            let grandTotal = 0;
+            colTotals.forEach(total => {
+                totalRow.push(total);
+                grandTotal += total;
+            });
+            totalRow.push(grandTotal);
+            totalRow.push(parseFloat(sheetTotalCFT.toFixed(4)));
+            matrix.push(totalRow);
+            const ws = XLSX.utils.aoa_to_sheet(matrix);
+            XLSX.utils.book_append_sheet(wb, ws, `Thickness ${thickness}`);
+        }
         XLSX.writeFile(wb, fileName);
     };
 
