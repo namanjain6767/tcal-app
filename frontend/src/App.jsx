@@ -104,7 +104,10 @@ function DashboardPage({ setPage, handleLogout, user }) {
     return (
         <div className="p-8 max-w-4xl mx-auto">
              <div className="flex justify-between items-center mb-8">
-                <h1 className="text-3xl font-bold">Dashboard</h1>
+                <div>
+                    <h1 className="text-3xl font-bold">Dashboard</h1>
+                    <p>Welcome, {user?.name} {user?.surname}</p>
+                </div>
                 <div>
                     {user?.isAdmin && <button onClick={() => setPage('admin')} className="p-2 bg-purple-600 text-white rounded hover:bg-purple-700 mr-2">Admin Panel</button>}
                     <button onClick={() => setPage('reports')} className="p-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 mr-4">View Reports</button>
@@ -595,10 +598,7 @@ function TimberRecorderPage({ user, setPage, handleLogout }) {
                         <p>Welcome, {user?.name} {user?.surname}</p>
                     </div>
                     <div>
-                        <button onClick={() => setPage('dashboard')} className="p-2 bg-gray-500 text-white rounded hover:bg-gray-600 mr-4">Back to Dashboard</button>
-                        {user?.isAdmin && <button onClick={() => setPage('admin')} className="p-2 bg-purple-600 text-white rounded hover:bg-purple-700 mr-2">Admin Panel</button>}
-                        <button onClick={() => setPage('reports')} className="p-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 mr-4">View Reports</button>
-                        <button onClick={handleLogout} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
+                        <button onClick={() => setPage('inward')} className="p-2 bg-gray-500 text-white rounded hover:bg-gray-600 mr-4">Back to Inward</button>
                     </div>
                 </div>
                 <div className="mb-6 p-4 bg-white rounded-lg shadow flex justify-between items-center">
