@@ -183,8 +183,7 @@ app.delete('/api/reports/:id', authenticate, async (req, res) => {
     }
 });
 
-
-// --- NEW: Log Endpoints ---
+// Log Endpoints
 app.post('/api/logs', authenticate, async (req, res) => {
     const userId = req.user.id;
     const { logContent, logName } = req.body;

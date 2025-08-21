@@ -255,7 +255,7 @@ export default function TimberRecorderPage({ user, setPage, handleLogout, active
                     <button onClick={() => { setActiveDraft(null); setPage('dashboard'); }} className="p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back to Dashboard</button>
                 </div>
                 <div className="mb-6 p-4 bg-white rounded-lg shadow flex justify-between items-center">
-                    <h1 className="text-2xl font-bold text-gray-900">TCAL</h1>
+                    <h1 className="text-2xl font-bold text-gray-900">T-CAL</h1>
                     <div className="font-mono text-blue-600 text-lg">
                        T: {selections.thickness || '_'} | L: {selections.length || '_'} | W: {selections.width || '_'}
                     </div>
@@ -263,7 +263,7 @@ export default function TimberRecorderPage({ user, setPage, handleLogout, active
                 </div>
                 <div className="grid gap-4 grid-cols-1 md:grid-cols-[1fr_4fr_3fr_2fr]">
                     <div>
-                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">THICKNESS</h2>
+                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Thickness</h2>
                         <select
                             value={selections.thickness}
                             onChange={(e) => setSelections({...selections, thickness: parseFloat(e.target.value)})}
