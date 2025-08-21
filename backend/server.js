@@ -5,9 +5,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
-const XLSX = require('xlsx');
-const fs = require('fs');
-const path = require('path');
+require('dotenv').config();
 
 const app = express();
 
@@ -30,11 +28,6 @@ app.use(cors({
 app.use(express.json()); 
 app.set('trust proxy', true);
 
-// --- Serve static files from the disk ---
-const reportsDirectory = '/var/data/reports';
-app.use('/reports', express.static(reportsDirectory));
-
-
 // --- PostgreSQL Database Connection ---
 const connectionString = process.env.DATABASE_URL;
 const pool = new Pool({ connectionString });
@@ -54,59 +47,6 @@ const authenticate = (req, res, next) => {
     }
 };
 
-// --- Helper function to generate XLSX buffer ---
-const generateXLSXBuffer = (dataToExport) => {
-    const groupedByThickness = {};
-    for (const key in dataToExport) {
-        const [t, l, w] = key.split('-');
-        const count = dataToExport[key];
-        if (!groupedByThickness[t]) groupedByThickness[t] = {};
-        if (!groupedByThickness[t][l]) groupedByThickness[t][l] = {};
-        groupedByThickness[t][l][w] = count;
-    }
-    const wb = XLSX.utils.book_new();
-    for (const thickness in groupedByThickness) {
-        const sheetData = groupedByThickness[thickness];
-        const allLengths = Object.keys(sheetData).sort((a, b) => parseFloat(a) - parseFloat(b));
-        const allWidths = new Set();
-        allLengths.forEach(l => Object.keys(sheetData[l]).forEach(w => allWidths.add(w)));
-        const sortedWidths = Array.from(allWidths).sort((a, b) => parseFloat(a) - parseFloat(b));
-        const matrix = [['Length \\ Width', ...sortedWidths, 'Total', 'CFT']];
-        const colTotals = new Array(sortedWidths.length).fill(0);
-        let sheetTotalCFT = 0;
-        allLengths.forEach(length => {
-            let rowTotal = 0;
-            const row = [parseFloat(length)];
-            let weightedWidthSum = 0;
-            sortedWidths.forEach((width, index) => {
-                const count = sheetData[length][width] || 0;
-                row.push(count);
-                rowTotal += count;
-                colTotals[index] += count;
-                weightedWidthSum += parseFloat(width) * count;
-            });
-            row.push(rowTotal);
-            const rowCFT = (parseFloat(thickness) * parseFloat(length) * weightedWidthSum) / 144;
-            row.push(parseFloat(rowCFT.toFixed(4)));
-            sheetTotalCFT += rowCFT;
-            matrix.push(row);
-        });
-        const totalRow = ['Total'];
-        let grandTotal = 0;
-        colTotals.forEach(total => {
-            totalRow.push(total);
-            grandTotal += total;
-        });
-        totalRow.push(grandTotal);
-        totalRow.push(parseFloat(sheetTotalCFT.toFixed(4)));
-        matrix.push(totalRow);
-        const ws = XLSX.utils.aoa_to_sheet(matrix);
-        XLSX.utils.book_append_sheet(wb, ws, `Thickness ${thickness}`);
-    }
-    return XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
-};
-
-
 // --- API Endpoints ---
 
 // User registration
@@ -117,11 +57,11 @@ app.post('/api/register', async (req, res) => {
     }
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        const result = await pool.query(
-            'INSERT INTO users (email, password_hash, name, surname, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        await pool.query(
+            'INSERT INTO users (email, password_hash, name, surname, phone) VALUES ($1, $2, $3, $4, $5)',
             [email, hashedPassword, name, surname, phone]
         );
-        res.status(201).send({ id: result.rows[0].id, message: 'User created successfully' });
+        res.status(201).send({ message: 'User created successfully' });
     } catch (error) {
         console.error("Registration Error:", error);
         if (error.code === '23505') {
@@ -243,77 +183,43 @@ app.delete('/api/reports/:id', authenticate, async (req, res) => {
     }
 });
 
-// Draft Endpoints
-app.get('/api/drafts', authenticate, async (req, res) => {
+
+// --- NEW: Log Endpoints ---
+app.post('/api/logs', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { logContent, logName } = req.body;
+    try {
+        await pool.query(
+            'INSERT INTO logs (user_id, log_name, log_content) VALUES ($1, $2, $3)',
+            [userId, logName, logContent]
+        );
+        res.status(201).send({ message: 'Log saved successfully' });
+    } catch (error) {
+        console.error("Save Log Error:", error);
+        res.status(500).send({ error: 'Failed to save log.' });
+    }
+});
+
+app.get('/api/logs', authenticate, async (req, res) => {
     const userId = req.user.id;
     try {
-        const result = await pool.query('SELECT * FROM drafts WHERE user_id = $1 ORDER BY updated_at DESC', [userId]);
+        const result = await pool.query('SELECT * FROM logs WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
         res.status(200).json(result.rows);
     } catch (error) {
-        console.error("Fetch Drafts Error:", error);
-        res.status(500).send({ error: 'Failed to fetch drafts.' });
+        console.error("Fetch Logs Error:", error);
+        res.status(500).send({ error: 'Failed to fetch logs.' });
     }
 });
 
-app.post('/api/drafts', authenticate, async (req, res) => {
+app.delete('/api/logs/:id', authenticate, async (req, res) => {
     const userId = req.user.id;
-    const { draftData } = req.body;
+    const logId = req.params.id;
     try {
-        const today = new Date();
-        const dateStr = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}-${today.getFullYear()}`;
-        
-        const countResult = await pool.query(
-            "SELECT COUNT(*) FROM drafts WHERE user_id = $1 AND draft_name LIKE $2",
-            [userId, `timber_record_${dateStr}%`]
-        );
-        const newCount = parseInt(countResult.rows[0].count, 10) + 1;
-        const formattedCount = String(newCount).padStart(3, '0');
-
-        const timeStr = today.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).replace(' ', '-');
-        const draftName = `timber_record_${dateStr}_${timeStr}_${formattedCount}.xlsx`;
-
-        const result = await pool.query(
-            'INSERT INTO drafts (user_id, draft_name, draft_data) VALUES ($1, $2, $3) RETURNING id, draft_name',
-            [userId, draftName, draftData]
-        );
-        res.status(201).send(result.rows[0]);
+        await pool.query('DELETE FROM logs WHERE id = $1 AND user_id = $2', [logId, userId]);
+        res.status(200).send({ message: 'Log deleted successfully' });
     } catch (error) {
-        console.error("Create Draft Error:", error);
-        res.status(500).send({ error: 'Failed to create draft.' });
-    }
-});
-
-app.put('/api/drafts/:id', authenticate, async (req, res) => {
-    const userId = req.user.id;
-    const draftId = req.params.id;
-    const { draftData } = req.body;
-    try {
-        const result = await pool.query(
-            'UPDATE drafts SET draft_data = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_id = $3 RETURNING id',
-            [draftData, draftId, userId]
-        );
-        if (result.rowCount === 0) {
-            return res.status(404).send({ error: 'Draft not found or not owned by user.' });
-        }
-        res.status(200).send(result.rows[0]);
-    } catch (error) {
-        console.error("Update Draft Error:", error);
-        res.status(500).send({ error: 'Failed to update draft.' });
-    }
-});
-
-app.delete('/api/drafts/:id', authenticate, async (req, res) => {
-    const userId = req.user.id;
-    const draftId = req.params.id;
-    try {
-        const result = await pool.query('DELETE FROM drafts WHERE id = $1 AND user_id = $2', [draftId, userId]);
-        if (result.rowCount === 0) {
-            return res.status(404).send({ error: 'Draft not found or not owned by user.' });
-        }
-        res.status(200).send({ message: 'Draft deleted successfully' });
-    } catch (error) {
-        console.error("Delete Draft Error:", error);
-        res.status(500).send({ error: 'Failed to delete draft.' });
+        console.error("Delete Log Error:", error);
+        res.status(500).send({ error: 'Failed to delete log.' });
     }
 });
 
