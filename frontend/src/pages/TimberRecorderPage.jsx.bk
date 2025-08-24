@@ -21,20 +21,8 @@ export default function TimberRecorderPage({ user, setPage, handleLogout, active
     const [entryHistory, setEntryHistory] = useState([]);
     const [reportFileName, setReportFileName] = useState('');
     const historyBoxRef = useRef(null);
-    const reportCounterRef = useRef(1);
 
     useEffect(() => {
-        const today = new Date().toLocaleDateString();
-        const lastReportDate = localStorage.getItem('lastReportDate');
-        let counter = 1;
-
-        if (lastReportDate === today) {
-            counter = parseInt(localStorage.getItem('dailyReportCounter') || '0', 10) + 1;
-        } else {
-            localStorage.setItem('dailyReportCounter', '0');
-        }
-        reportCounterRef.current = counter;
-        
         const date = new Date();
         const dateStr = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}-${date.getFullYear()}`;
         let hours = date.getHours();
@@ -43,9 +31,7 @@ export default function TimberRecorderPage({ user, setPage, handleLogout, active
         hours = hours ? hours : 12;
         const minutes = String(date.getMinutes()).padStart(2, '0');
         const timeStr = `${hours}-${minutes}-${ampm}`;
-        const formattedCounter = String(counter).padStart(3, '0');
-
-        setReportFileName(`Multi_Length_Counting_${dateStr}_${timeStr}_${formattedCounter}.xlsx`);
+        setReportFileName(`timber_record_${dateStr}_${timeStr}.xlsx`);
     }, []);
 
     useEffect(() => {
@@ -259,9 +245,6 @@ export default function TimberRecorderPage({ user, setPage, handleLogout, active
                 console.error("Failed to save report or log:", error);
             }
 
-            localStorage.setItem('lastReportDate', new Date().toLocaleDateString());
-            localStorage.setItem('dailyReportCounter', reportCounterRef.current);
-
             localStorage.removeItem('localDraft');
             localStorage.removeItem('localRejectedDraft');
             setRecordedData({});
@@ -433,4 +416,3 @@ export default function TimberRecorderPage({ user, setPage, handleLogout, active
         </div>
     );
 }
-

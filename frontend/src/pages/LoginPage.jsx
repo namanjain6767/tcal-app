@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
-
-const API_URL = import.meta.env.VITE_API_URL;
+import api from '../api'; // NEW: Import the central api instance
 
 export default function LoginPage({ setPage, setUser }) {
     const [email, setEmail] = useState('');
@@ -13,7 +11,8 @@ export default function LoginPage({ setPage, setUser }) {
         e.preventDefault();
         setError('');
         try {
-            const response = await axios.post(`${API_URL}/login`, { email, password });
+            // UPDATED: Use the central 'api' instance
+            const response = await api.post('/login', { email, password });
             const { token } = response.data;
             localStorage.setItem('token', token);
             const decodedUser = jwtDecode(token);
@@ -34,9 +33,6 @@ export default function LoginPage({ setPage, setUser }) {
                     <button type="submit" className="w-full p-2 bg-blue-600 text-white rounded hover:bg-blue-700">Login</button>
                     {error && <p className="text-red-500 mt-4 text-center">{error}</p>}
                 </form>
-                <p className="mt-4 text-center">
-                    Don't have an account? <button onClick={() => setPage('register')} className="text-blue-600">Register</button>
-                </p>
             </div>
         </div>
     );

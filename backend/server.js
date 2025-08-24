@@ -49,19 +49,29 @@ const authenticate = (req, res, next) => {
 
 // --- API Endpoints ---
 
-// User registration
-app.post('/api/register', async (req, res) => {
-    const { email, password, name, surname, phone } = req.body;
-    if (!email || !password || !name || !surname || !phone) {
-        return res.status(400).send({ error: 'All fields are required.' });
-    }
+// UPDATED: User registration is now an admin-only action
+app.post('/api/register', authenticate, async (req, res) => {
+    // First, check if the person making the request is an admin
+    const requesterId = req.user.id;
     try {
+        const requesterResult = await pool.query('SELECT is_admin FROM users WHERE id = $1', [requesterId]);
+        if (requesterResult.rows.length === 0 || !requesterResult.rows[0].is_admin) {
+            return res.status(403).send({ error: 'Forbidden: Only admins can register new users.' });
+        }
+
+        // If they are an admin, proceed with registration
+        const { email, password, name, surname, phone } = req.body;
+        if (!email || !password || !name || !surname || !phone) {
+            return res.status(400).send({ error: 'All fields are required.' });
+        }
+    
         const hashedPassword = await bcrypt.hash(password, 10);
         await pool.query(
             'INSERT INTO users (email, password_hash, name, surname, phone) VALUES ($1, $2, $3, $4, $5)',
             [email, hashedPassword, name, surname, phone]
         );
         res.status(201).send({ message: 'User created successfully' });
+
     } catch (error) {
         console.error("Registration Error:", error);
         if (error.code === '23505') {
