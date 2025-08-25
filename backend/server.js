@@ -13,7 +13,8 @@ const app = express();
 const allowedOrigins = [
     'http://localhost:5173',
 //    'https://astounding-liger-a7f504.netlify.app' 
-    'https://tcal-app.vercel.app'
+//    'https://tcal-app.vercel.app'
+      'https://draveta.vercel.app'
     
     // Your live Netlify URL
 ];
