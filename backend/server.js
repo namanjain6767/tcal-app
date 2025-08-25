@@ -11,10 +11,11 @@ const app = express();
 
 // --- CORS Configuration ---
 const allowedOrigins = [
-    'http://localhost:5173',
+       'http://localhost:5173',
+       'http://192.168.29.125:5173'
 //    'https://astounding-liger-a7f504.netlify.app' 
 //    'https://tcal-app.vercel.app'
-      'https://draveta.vercel.app'
+//      'https://draveta.vercel.app'
     
     // Your live Netlify URL
 ];
