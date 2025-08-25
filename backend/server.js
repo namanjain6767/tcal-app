@@ -12,7 +12,10 @@ const app = express();
 // --- CORS Configuration ---
 const allowedOrigins = [
     'http://localhost:5173',
-    'https://astounding-liger-a7f504.netlify.app' // Your live Netlify URL
+//    'https://astounding-liger-a7f504.netlify.app' 
+    'https://tcal-app.vercel.app'
+    
+    // Your live Netlify URL
 ];
 
 app.use(cors({
