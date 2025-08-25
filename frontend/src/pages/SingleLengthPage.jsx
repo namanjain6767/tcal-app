@@ -23,22 +23,22 @@ const CountByWidth = ({ title, length, selections, selectedWidth, handleSelectio
     const lastEntryCount = recordedData[lastEntryKey] || 0;
 
     return (
-        <div className={`p-4 bg-white rounded-xl shadow-lg ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
+        <div className={`p-4 md:p-6 bg-white rounded-xl shadow-lg ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
             <div className="flex justify-between items-center border-b-2 border-gray-200 pb-3 mb-4">
-                <h2 className="text-xl font-bold text-gray-700">{title}</h2>
-                <div className="p-2 bg-gray-100 rounded-lg text-center text-sm font-mono text-gray-800">
+                <h2 className="text-xl md:text-2xl font-bold text-gray-700">{title}</h2>
+                <div className="p-2 bg-gray-100 rounded-lg text-center text-sm md:text-base font-mono text-gray-800">
                     {selectedWidth ? `T:${selections.thickness}, L:${length}, W:${selectedWidth} (Total: ${lastEntryCount})` : "Select a width"}
                 </div>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-3 md:space-y-4">
                 {widthData.map((row, rowIndex) => (
-                    <div key={rowIndex} className="grid grid-cols-7 gap-2">
+                    <div key={rowIndex} className="grid grid-cols-7 gap-2 md:gap-3">
                         {row.map(w => (
                             <button
                                 key={w}
                                 onClick={() => handleSelection(w)}
                                 disabled={disabled}
-                                className={`py-2 px-2 text-sm rounded-lg shadow-md font-bold transition-all transform hover:scale-105 ${selectedWidth === w && !disabled ? 'bg-indigo-600 text-white ring-2 ring-indigo-300' : 'bg-white hover:bg-gray-200'}`}
+                                className={`py-2 px-2 text-sm md:py-3 md:px-4 md:text-base rounded-lg shadow-md font-bold transition-all transform hover:scale-105 ${selectedWidth === w && !disabled ? 'bg-indigo-600 text-white ring-2 ring-indigo-300' : 'bg-white hover:bg-gray-200'}`}
                             >
                                 {w}
                             </button>
@@ -46,14 +46,14 @@ const CountByWidth = ({ title, length, selections, selectedWidth, handleSelectio
                     </div>
                 ))}
             </div>
-            <div className="mt-4 border-t-2 border-gray-200 pt-4">
-                <div className="grid grid-cols-10 gap-2">
+            <div className="mt-4 md:mt-6 border-t-2 border-gray-200 pt-4">
+                <div className="grid grid-cols-10 gap-2 md:gap-3">
                     {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
                         <button
                             key={num}
                             onClick={() => handleIncrement(num, length, selectedWidth)}
                             disabled={!selectedWidth || disabled}
-                            className="py-2 px-2 text-sm bg-blue-500 text-white font-bold rounded-lg shadow-lg hover:bg-blue-600 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="py-2 px-2 text-sm md:py-3 md:px-4 bg-blue-500 text-white font-bold rounded-lg shadow-lg hover:bg-blue-600 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             x{num}
                         </button>
@@ -119,6 +119,15 @@ export default function SingleLengthPage({ user, setPage, handleLogout, activeDr
 
     useEffect(() => {
         generateNewFileName();
+
+        const viewport = document.querySelector("meta[name=viewport]");
+        if (viewport) {
+            const defaultContent = viewport.getAttribute('content');
+            if (window.innerWidth < 1024) {
+                 viewport.setAttribute('content', 'width=device-width, initial-scale=0.5');
+            }
+            return () => viewport.setAttribute('content', defaultContent);
+        }
     }, []);
 
     useEffect(() => {
