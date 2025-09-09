@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import api from '../api';
 
-export default function ReportsPage({ setPage, setActiveDraft, handleBack, user }) {
+export default function ReportsPage({ setPage, setActiveDraft }) {
     const [reports, setReports] = useState([]);
 
     useEffect(() => {
@@ -17,11 +17,7 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
         fetchReports();
     }, []);
 
-    // --- Report Generation Logic for Multi-Length Reports ---
-    const generateMultiLengthReport = (reportData, fileName) => {
-        const acceptedData = reportData.accepted || {};
-        const rejectedData = reportData.rejected || {};
-        const sessionInfo = reportData.sessionInfo || {};
+    const generateMultiLengthReport = (acceptedData, rejectedData, fileName) => {
         const wb = XLSX.utils.book_new();
 
         const processSheetData = (data, thickness) => {
@@ -31,20 +27,13 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
             allLengths.forEach(l => Object.keys(sheetData[l]).forEach(w => allWidths.add(w)));
             const sortedWidths = Array.from(allWidths).sort((a, b) => parseFloat(a) - parseFloat(b));
             
-            let matrix = [];
-            if(sessionInfo && sessionInfo.vehicleNumber) {
-                matrix.push([`Vehicle Number:`, sessionInfo.vehicleNumber]);
-                matrix.push([`Note:`, sessionInfo.note]);
-                matrix.push([]);
-            }
-            matrix.push(['L / W', ...sortedWidths, 'CFT']);
-
-            const headerRowIndex = sessionInfo ? 3 : 0;
-
+            const matrix = [['', ...sortedWidths, 'CFT']];
             const colCFTs = new Array(sortedWidths.length).fill(0);
             let totalSheetCFT = 0;
             
-            let range1CFT = 0, range2CFT = 0, range3CFT = 0;
+            let range1CFT = 0;
+            let range2CFT = 0;
+            let range3CFT = 0;
 
             allLengths.forEach(length => {
                 let rowCFT = 0;
@@ -53,6 +42,7 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
                 sortedWidths.forEach((width, index) => {
                     const count = sheetData[length]?.[width] || 0;
                     row.push(count);
+
                     const itemCFT = (parseFloat(thickness) * parseFloat(length) * parseFloat(width) * count) / 144;
                     rowCFT += itemCFT;
                     colCFTs[index] += itemCFT;
@@ -70,7 +60,13 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
 
             const totalRow = ['CFT', ...colCFTs.map(c => parseFloat(c.toFixed(4))), parseFloat(totalSheetCFT.toFixed(4))];
             matrix.push(totalRow);
-            const summaryMatrix = [ [], ['1.5 - 2.75', parseFloat(range1CFT.toFixed(4))], ['3 - 4.75', parseFloat(range2CFT.toFixed(4))], ['5 and Above', parseFloat(range3CFT.toFixed(4))] ];
+
+            const summaryMatrix = [
+                [], // Spacer row
+                ['1.5 - 2.75', parseFloat(range1CFT.toFixed(4))],
+                ['3 - 4.75', parseFloat(range2CFT.toFixed(4))],
+                ['5 and Above', parseFloat(range3CFT.toFixed(4))]
+            ];
             
             const finalMatrix = [...matrix, ...summaryMatrix];
             const ws = XLSX.utils.aoa_to_sheet(finalMatrix);
@@ -79,33 +75,40 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
             const yellowFill = { fgColor: { rgb: "FFEB9C" } };
             const blueFill = { fgColor: { rgb: "BDD7EE" } };
 
-            for (let r = headerRowIndex + 1; r < matrix.length - 1; r++) {
-                const len = matrix[r][0];
+            for (let i = 1; i < matrix.length - 1; i++) {
+                const len = matrix[i][0];
                 let fill = null;
                 if (len >= 1.5 && len <= 2.75) fill = greenFill;
                 else if (len >= 3 && len <= 4.75) fill = yellowFill;
                 else if (len >= 5) fill = blueFill;
 
                 if (fill) {
-                    for (let c = 0; c < matrix[r].length; c++) {
-                        const cellAddress = XLSX.utils.encode_cell({ r, c });
-                        if(ws[cellAddress]) ws[cellAddress].s = { fill };
+                    for (let j = 0; j < matrix[i].length; j++) {
+                        const cellAddress = XLSX.utils.encode_cell({ r: i, c: j });
+                        if (ws[cellAddress]) {
+                            ws[cellAddress].s = { fill: fill };
+                        }
                     }
                 }
             }
             
             const summaryStartRow = matrix.length + 1;
-            [greenFill, yellowFill, blueFill].forEach((fill, index) => {
-                const row = summaryStartRow + index;
-                for (let c = 0; c < 2; c++) {
-                    const cellAddress = XLSX.utils.encode_cell({ r: row, c });
-                    if(ws[cellAddress]) ws[cellAddress].s = { fill };
+            const summaryFills = [greenFill, yellowFill, blueFill];
+            for (let i = 0; i < summaryMatrix.length - 1; i++) {
+                if (summaryMatrix[i+1].length > 0) {
+                    const fill = summaryFills[i];
+                    for (let j = 0; j < summaryMatrix[i+1].length; j++) {
+                        const cellAddress = XLSX.utils.encode_cell({ r: summaryStartRow + i, c: j });
+                        if (ws[cellAddress]) {
+                            ws[cellAddress].s = { fill: fill };
+                        }
+                    }
                 }
-            });
+            }
+
             return ws;
         };
 
-        // Process accepted data
         const groupedByThickness = {};
         for (const key in acceptedData) {
             const [t, l, w] = key.split('-');
@@ -119,7 +122,6 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
             XLSX.utils.book_append_sheet(wb, ws, `Thickness ${thickness}`);
         }
 
-        // Process rejected data
         if (Object.keys(rejectedData).length > 0) {
             const rejectedGrouped = {};
             for (const key in rejectedData) {
@@ -138,7 +140,6 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
         XLSX.writeFile(wb, fileName);
     };
 
-    // --- Report Generation Logic for Single-Length Reports ---
     const generateSingleLengthReport = (reportData, fileName) => {
         const wb = XLSX.utils.book_new();
         
@@ -162,7 +163,9 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
             const colCFTs = new Array(sortedWidths.length).fill(0);
             let totalSheetCFT = 0;
             
-            let range1CFT = 0, range2CFT = 0, range3CFT = 0;
+            let range1CFT = 0;
+            let range2CFT = 0;
+            let range3CFT = 0;
 
             allLengths.forEach(length => {
                 let rowCFT = 0;
@@ -171,6 +174,7 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
                 sortedWidths.forEach((width, index) => {
                     const count = sheetData[length]?.[width] || 0;
                     row.push(count);
+
                     const itemCFT = (parseFloat(thickness) * parseFloat(length) * parseFloat(width) * count) / 144;
                     rowCFT += itemCFT;
                     colCFTs[index] += itemCFT;
@@ -189,7 +193,12 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
             const totalRow = ['CFT', ...colCFTs.map(c => parseFloat(c.toFixed(4))), parseFloat(totalSheetCFT.toFixed(4))];
             matrix.push(totalRow);
 
-            const summaryMatrix = [ [], ['1.5 - 2.75', parseFloat(range1CFT.toFixed(4))], ['3 - 4.75', parseFloat(range2CFT.toFixed(4))], ['5 and Above', parseFloat(range3CFT.toFixed(4))] ];
+            const summaryMatrix = [
+                [], // Spacer row
+                ['1.5 - 2.75', parseFloat(range1CFT.toFixed(4))],
+                ['3 - 4.75', parseFloat(range2CFT.toFixed(4))],
+                ['5 and Above', parseFloat(range3CFT.toFixed(4))]
+            ];
             
             const finalMatrix = [...matrix, ...summaryMatrix];
             const ws = XLSX.utils.aoa_to_sheet(finalMatrix);
@@ -208,20 +217,26 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
                 if (fill) {
                     for (let j = 0; j < matrix[i].length; j++) {
                         const cellAddress = XLSX.utils.encode_cell({ r: i, c: j });
-                        if (ws[cellAddress]) ws[cellAddress].s = { fill };
+                        if (ws[cellAddress]) {
+                            ws[cellAddress].s = { fill: fill };
+                        }
                     }
                 }
             }
             
             const summaryStartRow = matrix.length + 1;
-            [greenFill, yellowFill, blueFill].forEach((fill, index) => {
-                if (summaryMatrix[index + 1].length > 0) {
-                    for (let j = 0; j < summaryMatrix[index + 1].length; j++) {
-                        const cellAddress = XLSX.utils.encode_cell({ r: summaryStartRow + index, c: j });
-                        if (ws[cellAddress]) ws[cellAddress].s = { fill };
+            const summaryFills = [greenFill, yellowFill, blueFill];
+            for (let i = 0; i < summaryMatrix.length - 1; i++) {
+                if (summaryMatrix[i+1].length > 0) {
+                    const fill = summaryFills[i];
+                    for (let j = 0; j < summaryMatrix[i+1].length; j++) {
+                        const cellAddress = XLSX.utils.encode_cell({ r: summaryStartRow + i, c: j });
+                        if (ws[cellAddress]) {
+                            ws[cellAddress].s = { fill: fill };
+                        }
                     }
                 }
-            });
+            }
             XLSX.utils.book_append_sheet(wb, ws, `Thickness ${thickness}`);
         }
         
@@ -231,9 +246,7 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
     const handleDeleteReport = async (reportId) => {
         if (window.confirm("Are you sure you want to delete this report?")) {
             try {
-                // Owners can delete any report in their organization
-                const endpoint = user?.role === 'owner' ? `/reports/org/${reportId}` : `/reports/${reportId}`;
-                await api.delete(endpoint);
+                await api.delete(`/reports/${reportId}`);
                 setReports(reports.filter(report => report.id !== reportId));
             } catch (error) {
                 alert("Could not delete report.");
@@ -259,27 +272,22 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
         if (report.file_name.includes('single_length_report')) {
             generateSingleLengthReport(report.report_data, report.file_name);
         } else {
-            generateMultiLengthReport(report.report_data, report.file_name);
+            generateMultiLengthReport(report.report_data.accepted, report.report_data.rejected, report.file_name);
         }
     };
 
     return (
-        <div className="p-8 max-w-6xl mx-auto">
-            <button onClick={handleBack} className="mb-6 p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back</button>
+        <div className="p-8 max-w-4xl mx-auto">
+            <button onClick={() => setPage('dashboard')} className="mb-6 p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back to Dashboard</button>
             <h1 className="text-3xl font-bold mb-6">Saved Reports</h1>
             <div className="bg-white p-6 rounded-lg shadow-md">
                 {reports.length > 0 ? reports.map(report => (
-                    <div key={report.id} className="flex flex-wrap justify-between items-center p-3 border-b hover:bg-gray-50">
-                        <div className="mb-2 sm:mb-0">
-                            <p className="font-semibold">{report.file_name}</p>
-                            {user?.role === 'owner' && <p className="text-sm text-gray-500">Created by: {report.name} {report.surname}</p>}
-                        </div>
-                        <div className="space-x-2 flex-shrink-0">
-                            {user?.role !== 'owner' && (
-                                <button onClick={() => handleLoadReport(report)} className="p-2 bg-teal-600 text-white rounded hover:bg-teal-700 text-sm">Load</button>
-                            )}
-                            <button onClick={() => handleDownload(report)} className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">Download</button>
-                            <button onClick={() => handleDeleteReport(report.id)} className="p-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm">Delete</button>
+                    <div key={report.id} className="flex justify-between items-center p-2 border-b">
+                        <span>{report.file_name}</span>
+                        <div className="space-x-2">
+                            <button onClick={() => handleLoadReport(report)} className="p-2 bg-teal-600 text-white rounded hover:bg-teal-700">Load</button>
+                            <button onClick={() => handleDownload(report)} className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700">Download</button>
+                            <button onClick={() => handleDeleteReport(report.id)} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
                         </div>
                     </div>
                 )) : <p>No reports saved yet.</p>}
@@ -287,4 +295,3 @@ export default function ReportsPage({ setPage, setActiveDraft, handleBack, user 
         </div>
     );
 }
-

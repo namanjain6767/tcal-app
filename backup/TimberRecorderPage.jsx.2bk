@@ -1,0 +1,81 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as XLSX from 'xlsx';
+import api from '../api';
+
+const getWebSocketURL = () => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const domain = new URL(apiUrl).host;
+    return `${wsProtocol}//${domain}`;
+};
+
+export default function TimberRecorderPage({ user, setPage, activeDraft, setActiveDraft, sessionInfo, handleBack }) {
+    const thicknessData = [0.75, 1, 1.5, 2, 2.5, 3];
+    const lengthData = [1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75, 8, 8.25, 8.5, 8.75, 9, 9.25, 9.5];
+    const widthData = [3, 4, 5, 6, 7, 8, 9, 10];
+    const [selectedThickness, setSelectedThickness] = useState(thicknessData[0]);
+    const [recordedData, setRecordedData] = useState({});
+    const [incrementHistory, setIncrementHistory] = useState([]);
+    const [reportFileName, setReportFileName] = useState('');
+    const ws = useRef(null);
+
+    // WebSocket Connection
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (!token || user.role !== 'counter') return;
+
+        const wsUrl = `${getWebSocketURL()}?token=${token}`;
+        ws.current = new WebSocket(wsUrl);
+        ws.current.onopen = () => console.log('Counter WebSocket Connected');
+        ws.current.onclose = () => console.log('Counter WebSocket disconnected');
+        return () => { if (ws.current) ws.current.close(); };
+    }, [user.role]);
+
+    // Generate and Send Filename
+    useEffect(() => {
+        if (sessionInfo && sessionInfo.vehicleNumber) {
+            const date = new Date();
+            const todayStr = date.toLocaleDateString();
+            const lastReportDate = localStorage.getItem('lastMultiLengthReportDate');
+            let counter = 1;
+            if (lastReportDate === todayStr) {
+                counter = parseInt(localStorage.getItem('dailyMultiLengthReportCounter') || '0', 10) + 1;
+            } else {
+                 localStorage.setItem('dailyMultiLengthReportCounter', '0');
+            }
+            
+            const dateStr = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}-${date.getFullYear()}`;
+            let hours = date.getHours();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12 || 12;
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const timeStr = `${hours}-${minutes}-${ampm}`;
+            const fileName = `${sessionInfo.vehicleNumber}_${dateStr}_${timeStr}_${String(counter).padStart(3, '0')}.xlsx`;
+            setReportFileName(fileName);
+
+            // Send filename update via WebSocket
+            if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                ws.current.send(JSON.stringify({ type: 'FILENAME_UPDATE', fileName: fileName }));
+            }
+        }
+    }, [sessionInfo]);
+
+    // Live CFT Calculation & WebSocket Update
+    const totalCFT = useMemo(() => {
+        let total = 0;
+        for (const key in recordedData) {
+            const [t, l, w] = key.split('-').map(Number);
+            total += (t * l * w * recordedData[key]) / 144;
+        }
+        return total;
+    }, [recordedData]);
+
+    useEffect(() => {
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({ type: 'CFT_UPDATE', cft: totalCFT }));
+        }
+    }, [totalCFT]);
+
+    // (The rest of the component logic remains the same...)
+}
+

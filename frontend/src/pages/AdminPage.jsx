@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
 
-// NEW: Registration Modal Component
+// --- Registration Modal Component ---
 function RegisterModal({ onClose, onUserRegistered }) {
     const [formData, setFormData] = useState({
         name: '',
@@ -9,7 +9,9 @@ function RegisterModal({ onClose, onUserRegistered }) {
         email: '',
         phone: '',
         password: '',
-        confirmPassword: ''
+        confirmPassword: '',
+        role: 'counter', // Default role
+        organization: ''
     });
     const [error, setError] = useState('');
 
@@ -25,14 +27,9 @@ function RegisterModal({ onClose, onUserRegistered }) {
             return;
         }
         try {
-            await api.post('/register', { 
-                email: formData.email, 
-                password: formData.password,
-                name: formData.name,
-                surname: formData.surname,
-                phone: formData.phone
-            });
-            onUserRegistered(); // This will close the modal and refresh the user list
+            await api.post('/register', formData);
+            alert("User registered successfully!");
+            onUserRegistered();
         } catch (err) {
             setError(err.response?.data?.error || 'Failed to register.');
         }
@@ -40,17 +37,22 @@ function RegisterModal({ onClose, onUserRegistered }) {
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="p-8 bg-white rounded-lg shadow-2xl w-96">
+            <div className="p-8 bg-white rounded-lg shadow-2xl w-full max-w-md">
                 <h1 className="text-2xl font-bold mb-6 text-center">Register New User</h1>
-                <form onSubmit={handleRegister}>
-                    <input name="name" value={formData.name} onChange={handleChange} placeholder="Name" className="w-full p-2 mb-4 border rounded" required />
-                    <input name="surname" value={formData.surname} onChange={handleChange} placeholder="Surname" className="w-full p-2 mb-4 border rounded" required />
-                    <input name="email" type="email" value={formData.email} onChange={handleChange} placeholder="Email" className="w-full p-2 mb-4 border rounded" required />
-                    <input name="phone" type="tel" value={formData.phone} onChange={handleChange} placeholder="Phone Number" className="w-full p-2 mb-4 border rounded" required />
-                    <input name="password" type="password" value={formData.password} onChange={handleChange} placeholder="Password" className="w-full p-2 mb-4 border rounded" required />
-                    <input name="confirmPassword" type="password" value={formData.confirmPassword} onChange={handleChange} placeholder="Confirm Password" className="w-full p-2 mb-4 border rounded" required />
-                    <button type="submit" className="w-full p-2 bg-green-600 text-white rounded hover:bg-green-700">Register</button>
-                    {error && <p className="text-red-500 mt-4 text-center">{error}</p>}
+                <form onSubmit={handleRegister} className="space-y-4">
+                    <input name="name" value={formData.name} onChange={handleChange} placeholder="Name" className="w-full p-2 border rounded" required />
+                    <input name="surname" value={formData.surname} onChange={handleChange} placeholder="Surname" className="w-full p-2 border rounded" required />
+                    <input name="email" type="email" value={formData.email} onChange={handleChange} placeholder="Email" className="w-full p-2 border rounded" required />
+                    <input name="phone" type="tel" value={formData.phone} onChange={handleChange} placeholder="Phone Number" className="w-full p-2 border rounded" required />
+                    <input name="organization" value={formData.organization} onChange={handleChange} placeholder="Organization Name" className="w-full p-2 border rounded" required />
+                     <select name="role" value={formData.role} onChange={handleChange} className="w-full p-2 border rounded" required>
+                        <option value="counter">Counter</option>
+                        <option value="owner">Owner</option>
+                    </select>
+                    <input name="password" type="password" value={formData.password} onChange={handleChange} placeholder="Password" className="w-full p-2 border rounded" required />
+                    <input name="confirmPassword" type="password" value={formData.confirmPassword} onChange={handleChange} placeholder="Confirm Password" className="w-full p-2 border rounded" required />
+                    <button type="submit" className="w-full p-2 bg-green-600 text-white rounded hover:bg-green-700">Register User</button>
+                    {error && <p className="text-red-500 mt-2 text-center">{error}</p>}
                 </form>
                 <button onClick={onClose} className="w-full p-2 mt-4 bg-gray-500 text-white rounded hover:bg-gray-600">Cancel</button>
             </div>
@@ -59,6 +61,7 @@ function RegisterModal({ onClose, onUserRegistered }) {
 }
 
 
+// --- Main Admin Page Component ---
 export default function AdminPage({ setPage }) {
     const [users, setUsers] = useState([]);
     const [showRegisterModal, setShowRegisterModal] = useState(false);
@@ -86,11 +89,6 @@ export default function AdminPage({ setPage }) {
             }
         }
     };
-    
-    const handleUserRegistered = () => {
-        setShowRegisterModal(false);
-        fetchUsers(); // Refresh the user list after a new user is created
-    };
 
     const UserRow = ({ user }) => {
         const [ipAddress, setIpAddress] = useState(user.allowed_ip || '');
@@ -108,6 +106,8 @@ export default function AdminPage({ setPage }) {
             <tr className="border-b">
                 <td className="p-2">{user.name} {user.surname}</td>
                 <td className="p-2">{user.email}</td>
+                <td className="p-2 uppercase">{user.role}</td>
+                <td className="p-2">{user.organization}</td>
                 <td className="p-2 font-mono">{user.last_login_ip || 'N/A'}</td>
                 <td className="p-2 flex items-center gap-2">
                     <input 
@@ -127,19 +127,20 @@ export default function AdminPage({ setPage }) {
     };
 
     return (
-        <div className="p-8 max-w-6xl mx-auto">
-            {showRegisterModal && <RegisterModal onClose={() => setShowRegisterModal(false)} onUserRegistered={handleUserRegistered} />}
+        <div className="p-8 max-w-7xl mx-auto">
             <div className="flex justify-between items-center mb-6">
-                <button onClick={() => setPage('dashboard')} className="p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back to Dashboard</button>
-                <button onClick={() => setShowRegisterModal(true)} className="p-2 bg-green-600 text-white rounded hover:bg-green-700">Register New User</button>
+                 <button onClick={() => setPage('dashboard')} className="p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back to Dashboard</button>
+                 <h1 className="text-3xl font-bold">Admin Panel</h1>
+                 <button onClick={() => setShowRegisterModal(true)} className="p-2 bg-green-600 text-white rounded hover:bg-green-700">Register New User</button>
             </div>
-            <h1 className="text-3xl font-bold mb-6">Admin Panel</h1>
             <div className="bg-white p-6 rounded-lg shadow-md overflow-x-auto">
                 <table className="w-full text-left">
                     <thead>
                         <tr className="border-b">
                             <th className="p-2">Name</th>
                             <th className="p-2">Email</th>
+                            <th className="p-2">Role</th>
+                            <th className="p-2">Organization</th>
                             <th className="p-2">Last Login IP</th>
                             <th className="p-2">Lock to IP Address</th>
                             <th className="p-2">Actions</th>
@@ -150,6 +151,8 @@ export default function AdminPage({ setPage }) {
                     </tbody>
                 </table>
             </div>
+            {showRegisterModal && <RegisterModal onClose={() => setShowRegisterModal(false)} onUserRegistered={() => { fetchUsers(); setShowRegisterModal(false); }} />}
         </div>
     );
 }
+

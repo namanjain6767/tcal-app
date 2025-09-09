@@ -1,434 +1,301 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import api from '../api';
-import GridButton from '../components/GridButton';
 
-export default function TimberRecorderPage({ user, setPage, handleLogout, activeDraft, setActiveDraft }) {
+const getWebSocketURL = () => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const domain = new URL(apiUrl).host;
+    return `${wsProtocol}//${domain}`;
+};
+
+
+export default function TimberRecorderPage({ user, setPage, handleBack, activeDraft, setActiveDraft, sessionInfo }) {
+    // --- Static Data ---
     const thicknessData = [0.75, 1, 1.5, 2, 2.5, 3];
-    const lengthData = [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75, 8, 8.25, 8.5, 8.75, 9, 9.25, 9.5, 9.75, 10, 10.25, 10.5, 10.75, 11, 11.25, 11.5, 11.75, 12, 12.25, 12.5, 12.75, 13, 13.25, 13.5, 13.75];
-    const widthData = [
-        [3, 4, 5],
-        [6, 7, 8],
-        [9, 10, 11],
-        [12]
-    ];
+    const lengthData = [1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75, 8, 8.25, 8.5, 8.75, 9, 9.25, 9.5, 9.75, 10, 10.25, 10.5, 10.75, 11, 11.25, 11.5, 11.75, 12, 12.25, 12.5, 12.75, 13, 13.25, 13.5, 13.75];
+    const widthData = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
-    const [selections, setSelections] = useState({ thickness: thicknessData[0], length: null, width: null });
+    // --- State Management ---
+    const [selectedThickness, setSelectedThickness] = useState(thicknessData[0]);
     const [recordedData, setRecordedData] = useState({});
-    const [rejectedData, setRejectedData] = useState({});
-    const [quantity, setQuantity] = useState(1);
-    const [useQuantity, setUseQuantity] = useState(false);
-    const [entryHistory, setEntryHistory] = useState([]);
+    const [incrementHistory, setIncrementHistory] = useState([]);
     const [reportFileName, setReportFileName] = useState('');
-    const historyBoxRef = useRef(null);
-    const reportCounterRef = useRef(1);
+    const ws = useRef(null);
 
+    // --- WebSocket Connection ---
     useEffect(() => {
-        const today = new Date().toLocaleDateString();
-        const lastReportDate = localStorage.getItem('lastReportDate');
-        let counter = 1;
+        const token = localStorage.getItem('token');
+        if (!token || user.role !== 'counter') return;
 
-        if (lastReportDate === today) {
-            counter = parseInt(localStorage.getItem('dailyReportCounter') || '0', 10) + 1;
-        } else {
-            localStorage.setItem('dailyReportCounter', '0');
+        const wsUrl = `${getWebSocketURL()}?token=${token}`;
+        ws.current = new WebSocket(wsUrl);
+
+        ws.current.onopen = () => console.log('Counter WebSocket Connected');
+        ws.current.onclose = () => console.log('Counter WebSocket disconnected');
+
+        return () => {
+            if (ws.current) ws.current.close();
+        };
+    }, [user.role]);
+
+    // --- Generate Filename ---
+    useEffect(() => {
+        if (sessionInfo && sessionInfo.vehicleNumber) {
+            const date = new Date();
+            const todayStr = date.toLocaleDateString();
+            const lastReportDate = localStorage.getItem('lastMultiLengthReportDate');
+            let counter = 1;
+            if (lastReportDate === todayStr) {
+                counter = parseInt(localStorage.getItem('dailyMultiLengthReportCounter') || '0', 10) + 1;
+            } else {
+                 localStorage.setItem('dailyMultiLengthReportCounter', '0');
+            }
+            
+            const dateStr = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}-${date.getFullYear()}`;
+            let hours = date.getHours();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12 || 12;
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const timeStr = `${hours}-${minutes}-${ampm}`;
+            const fileName = `${sessionInfo.vehicleNumber}_${dateStr}_${timeStr}_${String(counter).padStart(3, '0')}.xlsx`;
+            setReportFileName(fileName);
+            
+            // Send filename update via WebSocket
+            if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                ws.current.send(JSON.stringify({ type: 'FILENAME_UPDATE', fileName: fileName }));
+            }
         }
-        reportCounterRef.current = counter;
-        
-        const date = new Date();
-        const dateStr = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}-${date.getFullYear()}`;
-        let hours = date.getHours();
-        const ampm = hours >= 12 ? 'PM' : 'AM';
-        hours = hours % 12;
-        hours = hours ? hours : 12;
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        const timeStr = `${hours}-${minutes}-${ampm}`;
-        const formattedCounter = String(counter).padStart(3, '0');
+    }, [sessionInfo]);
 
-        setReportFileName(`Multi_Length_Counting_${dateStr}_${timeStr}_${formattedCounter}.xlsx`);
-    }, []);
-
+    // --- Load data from active draft or local storage ---
     useEffect(() => {
         if (activeDraft) {
             setRecordedData(activeDraft.draft_data.accepted || {});
-            setRejectedData(activeDraft.draft_data.rejected || {});
-            localStorage.setItem('localDraft', JSON.stringify(activeDraft.draft_data.accepted || {}));
-            localStorage.setItem('localRejectedDraft', JSON.stringify(activeDraft.draft_data.rejected || {}));
         } else {
-            const savedDraft = localStorage.getItem('localDraft');
-            if (savedDraft) setRecordedData(JSON.parse(savedDraft));
-            
-            const savedRejectedDraft = localStorage.getItem('localRejectedDraft');
-            if (savedRejectedDraft) setRejectedData(JSON.parse(savedRejectedDraft));
+            const savedData = localStorage.getItem('multiLengthLocalData');
+            if (savedData) setRecordedData(JSON.parse(savedData));
         }
     }, [activeDraft]);
 
+    // --- Live CFT Calculation & WebSocket Update ---
+    const totalCFT = useMemo(() => {
+        let total = 0;
+        for (const key in recordedData) {
+            const [t, l, w] = key.split('-').map(Number);
+            const count = recordedData[key];
+            total += (t * l * w * count) / 144;
+        }
+        return total;
+    }, [recordedData]);
+
     useEffect(() => {
-        if (historyBoxRef.current) {
-            historyBoxRef.current.scrollTop = historyBoxRef.current.scrollHeight;
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({ type: 'CFT_UPDATE', cft: totalCFT }));
         }
-    }, [entryHistory]);
+    }, [totalCFT]);
 
-    const generateAndDownloadXLSX = (acceptedData, rejectedData, fileName) => {
-        const wb = XLSX.utils.book_new();
-
-        const processSheetData = (data, thickness) => {
-            const sheetData = data;
-            const allLengths = Object.keys(sheetData).sort((a, b) => parseFloat(a) - parseFloat(b));
-            const allWidths = new Set();
-            allLengths.forEach(l => Object.keys(sheetData[l]).forEach(w => allWidths.add(w)));
-            const sortedWidths = Array.from(allWidths).sort((a, b) => parseFloat(a) - parseFloat(b));
-            
-            const matrix = [['', ...sortedWidths, 'CFT']];
-            const colCFTs = new Array(sortedWidths.length).fill(0);
-            let totalSheetCFT = 0;
-            
-            let range1CFT = 0;
-            let range2CFT = 0;
-            let range3CFT = 0;
-
-            allLengths.forEach(length => {
-                let rowCFT = 0;
-                const row = [parseFloat(length)];
-                
-                sortedWidths.forEach((width, index) => {
-                    const count = sheetData[length]?.[width] || 0;
-                    row.push(count);
-
-                    const itemCFT = (parseFloat(thickness) * parseFloat(length) * parseFloat(width) * count) / 144;
-                    rowCFT += itemCFT;
-                    colCFTs[index] += itemCFT;
-                });
-
-                row.push(parseFloat(rowCFT.toFixed(4)));
-                totalSheetCFT += rowCFT;
-                matrix.push(row);
-
-                const len = parseFloat(length);
-                if (len >= 1.5 && len <= 2.75) range1CFT += rowCFT;
-                else if (len >= 3 && len <= 4.75) range2CFT += rowCFT;
-                else if (len >= 5) range3CFT += rowCFT;
-            });
-
-            const totalRow = ['CFT', ...colCFTs.map(c => parseFloat(c.toFixed(4))), parseFloat(totalSheetCFT.toFixed(4))];
-            matrix.push(totalRow);
-
-            const summaryMatrix = [
-                [], // Spacer row
-                ['1.5 - 2.75', parseFloat(range1CFT.toFixed(4))],
-                ['3 - 4.75', parseFloat(range2CFT.toFixed(4))],
-                ['5 and Above', parseFloat(range3CFT.toFixed(4))]
-            ];
-            
-            const finalMatrix = [...matrix, ...summaryMatrix];
-            const ws = XLSX.utils.aoa_to_sheet(finalMatrix);
-            
-            const greenFill = { fgColor: { rgb: "C6EFCE" } };
-            const yellowFill = { fgColor: { rgb: "FFEB9C" } };
-            const blueFill = { fgColor: { rgb: "BDD7EE" } };
-
-            for (let i = 1; i < matrix.length - 1; i++) {
-                const len = matrix[i][0];
-                let fill = null;
-                if (len >= 1.5 && len <= 2.75) fill = greenFill;
-                else if (len >= 3 && len <= 4.75) fill = yellowFill;
-                else if (len >= 5) fill = blueFill;
-
-                if (fill) {
-                    for (let j = 0; j < matrix[i].length; j++) {
-                        const cellAddress = XLSX.utils.encode_cell({ r: i, c: j });
-                        if (ws[cellAddress]) {
-                            ws[cellAddress].s = { fill: fill };
-                        }
-                    }
-                }
-            }
-            
-            const summaryStartRow = matrix.length + 1;
-            const summaryFills = [greenFill, yellowFill, blueFill];
-            for (let i = 0; i < summaryMatrix.length - 1; i++) {
-                if (summaryMatrix[i+1].length > 0) {
-                    const fill = summaryFills[i];
-                    for (let j = 0; j < summaryMatrix[i+1].length; j++) {
-                        const cellAddress = XLSX.utils.encode_cell({ r: summaryStartRow + i, c: j });
-                        if (ws[cellAddress]) {
-                            ws[cellAddress].s = { fill: fill };
-                        }
-                    }
-                }
-            }
-
-            return ws;
-        };
-
-        // Process accepted data
-        const groupedByThickness = {};
-        for (const key in acceptedData) {
-            const [t, l, w] = key.split('-');
-            const count = acceptedData[key];
-            if (!groupedByThickness[t]) groupedByThickness[t] = {};
-            if (!groupedByThickness[t][l]) groupedByThickness[t][l] = {};
-            groupedByThickness[t][l][w] = count;
-        }
-        for (const thickness in groupedByThickness) {
-            const ws = processSheetData(groupedByThickness[thickness], thickness);
-            XLSX.utils.book_append_sheet(wb, ws, `Thickness ${thickness}`);
-        }
-
-        // Process rejected data
-        if (Object.keys(rejectedData).length > 0) {
-            const rejectedGrouped = {};
-            for (const key in rejectedData) {
-                const [t, l, w] = key.split('-');
-                const count = rejectedData[key];
-                if (!rejectedGrouped[t]) rejectedGrouped[t] = {};
-                if (!rejectedGrouped[t][l]) rejectedGrouped[t][l] = {};
-                rejectedGrouped[t][l][w] = count;
-            }
-            for (const thickness in rejectedGrouped) {
-                 const ws = processSheetData(rejectedGrouped[thickness], thickness);
-                 XLSX.utils.book_append_sheet(wb, ws, `Rejected ${thickness}`);
-            }
-        }
-        
-        XLSX.writeFile(wb, fileName);
+    // --- Event Handlers ---
+    const handleIncrement = (length, width) => {
+        const key = `${selectedThickness}-${length}-${width}`;
+        const newData = { ...recordedData, [key]: (recordedData[key] || 0) + 1 };
+        setRecordedData(newData);
+        setIncrementHistory(prevHistory => [...prevHistory, key]);
+        localStorage.setItem('multiLengthLocalData', JSON.stringify(newData));
     };
     
-    const handleThicknessChange = (event) => {
-        const newThickness = parseFloat(event.target.value);
-        setSelections({ thickness: newThickness, length: null, width: null });
-    };
-
-    const handleButtonClick = async (value, group) => {
-        if (value === 'Next' || value === 'Reject') {
-            if (selections.thickness && selections.length && selections.width) {
-                const key = `${selections.thickness}-${selections.length}-${selections.width}`;
-                const incrementAmount = useQuantity ? quantity : 1;
-                
-                const newEntry = { ...selections, quantity: incrementAmount, status: value === 'Next' ? 'Accepted' : 'Rejected' };
-                
-                setEntryHistory(prevHistory => [...prevHistory, newEntry]);
-
-                if (value === 'Next') {
-                    const newData = { ...recordedData, [key]: (recordedData[key] || 0) + incrementAmount };
-                    setRecordedData(newData);
-                    localStorage.setItem('localDraft', JSON.stringify(newData));
-                } else {
-                    const newRejectedData = { ...rejectedData, [key]: (rejectedData[key] || 0) + incrementAmount };
-                    setRejectedData(newRejectedData);
-                    localStorage.setItem('localRejectedDraft', JSON.stringify(newRejectedData));
-                }
-
-                setSelections(prev => ({ ...prev, length: null, width: null }));
-                setQuantity(1);
+    const handleUndo = () => {
+        if (incrementHistory.length > 0) {
+            const lastKey = incrementHistory[incrementHistory.length - 1];
+            const currentCount = recordedData[lastKey];
+            if (currentCount > 0) {
+                const newData = { ...recordedData, [lastKey]: currentCount - 1 };
+                if (newData[lastKey] === 0) delete newData[lastKey];
+                setRecordedData(newData);
+                setIncrementHistory(prevHistory => prevHistory.slice(0, -1));
+                localStorage.setItem('multiLengthLocalData', JSON.stringify(newData));
             }
-            return;
-        }
-        if (value === 'Finish') {
-            if (Object.keys(recordedData).length === 0 && Object.keys(rejectedData).length === 0) {
-                console.warn("No data to save or export.");
-                return;
-            }
-            
-            const logFileName = `${reportFileName.replace('.xlsx', '')}.txt`;
-            
-            generateAndDownloadXLSX(recordedData, rejectedData, reportFileName);
-
-            let logContent = "SESSION LOG\n==================\n\n";
-            logContent += "ACCEPTED ITEMS:\n";
-            for (const key in recordedData) {
-                const [t, l, w] = key.split('-');
-                logContent += `T: ${t}, L: ${l}, W: ${w} - Count: ${recordedData[key]}\n`;
-            }
-            logContent += "\nREJECTED ITEMS:\n";
-            for (const key in rejectedData) {
-                const [t, l, w] = key.split('-');
-                logContent += `T: ${t}, L: ${l}, W: ${w} - Count: ${rejectedData[key]}\n`;
-            }
-
-            try {
-                await api.post('/reports', {
-                    reportData: { accepted: recordedData, rejected: rejectedData },
-                    fileName: reportFileName
-                });
-                await api.post('/logs', {
-                    logContent: logContent,
-                    logName: logFileName
-                });
-            } catch (error) {
-                console.error("Failed to save report or log:", error);
-            }
-
-            localStorage.setItem('lastReportDate', new Date().toLocaleDateString());
-            localStorage.setItem('dailyReportCounter', reportCounterRef.current);
-
-            localStorage.removeItem('localDraft');
-            localStorage.removeItem('localRejectedDraft');
-            setRecordedData({});
-            setRejectedData({});
-            setEntryHistory([]);
-            return;
-        }
-        
-        if (group === 'width' && !selections.length) {
-            return;
-        }
-        if (group in selections) {
-            setSelections(prev => ({ ...prev, [group]: value }));
+        } else {
+            alert("No more actions to undo.");
         }
     };
 
     const handleReset = () => {
-        if (window.confirm("Are you sure you want to clear all current entries? This action cannot be undone.")) {
-            localStorage.removeItem('localDraft');
-            localStorage.removeItem('localRejectedDraft');
+        if (window.confirm("Are you sure you want to clear all current entries?")) {
             setRecordedData({});
-            setRejectedData({});
-            setEntryHistory([]);
+            if (setActiveDraft) setActiveDraft(null);
+            setIncrementHistory([]);
+            localStorage.removeItem('multiLengthLocalData');
             alert("Current session has been cleared.");
         }
     };
 
+    const handleFinish = async () => {
+         if (Object.keys(recordedData).length === 0) {
+            alert("No data recorded to generate a report.");
+            return;
+        }
+        const date = new Date();
+        const todayStr = date.toLocaleDateString();
+        const counter = parseInt(localStorage.getItem('dailyMultiLengthReportCounter') || '0', 10) + 1;
+        localStorage.setItem('lastMultiLengthReportDate', todayStr);
+        localStorage.setItem('dailyMultiLengthReportCounter', counter);
+        
+        generateAndDownloadXLSX(recordedData, reportFileName);
+
+        const logFileName = `${reportFileName.replace('.xlsx', '')}.txt`;
+        let logContent = `SESSION LOG: ${logFileName}\n`;
+        logContent += `Vehicle Number: ${sessionInfo.vehicleNumber}\n`;
+        logContent += `Note: ${sessionInfo.note}\n`;
+        logContent += "=============================\n\n";
+        logContent += "ENTRIES:\n";
+        incrementHistory.forEach((key, index) => {
+            const [t, l, w] = key.split('-');
+            logContent += `Entry ${index + 1}: T:${t}, L:${l}, W:${w} - Accepted\n`;
+        });
+        
+        try {
+            await api.post('/reports', {
+                reportData: { accepted: recordedData, sessionInfo: sessionInfo }, 
+                fileName: reportFileName
+            });
+             await api.post('/logs', {
+                logContent: logContent,
+                logName: logFileName
+            });
+            alert("Report and log saved successfully!");
+        } catch (error) {
+            console.error("Failed to save report or log:", error);
+            alert("Failed to save the report or log.");
+        }
+        handleReset();
+    };
+
+    const generateAndDownloadXLSX = (data, fileName) => {
+        const wb = XLSX.utils.book_new();
+        const groupedByThickness = {};
+        for (const key in data) {
+            const [t, l, w] = key.split('-');
+            const count = data[key];
+            if (!groupedByThickness[t]) groupedByThickness[t] = {};
+            if (!groupedByThickness[t][l]) groupedByThickness[t][l] = {};
+            groupedByThickness[t][l][w] = count;
+        }
+
+        for (const thickness in groupedByThickness) {
+            const sheetData = groupedByThickness[thickness];
+            const allLengths = Object.keys(sheetData).sort((a, b) => parseFloat(a) - parseFloat(b));
+            const allWidths = new Set(widthData); // Use the full widthData for columns
+            const sortedWidths = Array.from(allWidths).sort((a, b) => parseFloat(a) - parseFloat(b));
+            
+            let matrix = [];
+            if(sessionInfo) {
+                matrix.push([`Vehicle Number:`, sessionInfo.vehicleNumber]);
+                matrix.push([`Note:`, sessionInfo.note]);
+                matrix.push([]);
+            }
+            matrix.push(['L / W', ...sortedWidths, 'CFT']);
+
+            const colCFTs = new Array(sortedWidths.length).fill(0);
+            let totalSheetCFT = 0;
+            
+            allLengths.forEach(length => {
+                let rowCFT = 0;
+                const row = [parseFloat(length)];
+                sortedWidths.forEach((width, index) => {
+                    const count = sheetData[length]?.[width] || 0;
+                    row.push(count);
+                    const itemCFT = (parseFloat(thickness) * parseFloat(length) * parseFloat(width) * count) / 144;
+                    rowCFT += itemCFT;
+                    colCFTs[index] += itemCFT;
+                });
+                row.push(parseFloat(rowCFT.toFixed(4)));
+                totalSheetCFT += rowCFT;
+                matrix.push(row);
+            });
+
+            const totalRow = ['CFT', ...colCFTs.map(c => parseFloat(c.toFixed(4))), parseFloat(totalSheetCFT.toFixed(4))];
+            matrix.push(totalRow);
+            
+            const ws = XLSX.utils.aoa_to_sheet(matrix);
+            XLSX.utils.book_append_sheet(wb, ws, `Thickness ${thickness}`);
+        }
+        
+        XLSX.writeFile(wb, fileName);
+    };
+
     return (
-         <div className="bg-gray-50 text-gray-800 p-4 md:p-6 min-h-screen font-sans">
-            <div className="max-w-7xl mx-auto">
-                <div className="flex justify-between items-center mb-4">
-                    <button onClick={() => { setActiveDraft(null); setPage('dashboard'); }} className="p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back to Dashboard</button>
-                </div>
-                <div className="mb-6 p-4 bg-white rounded-lg shadow flex justify-between items-center">
-                    <h1 className="text-2xl font-bold text-gray-900">TCAL</h1>
-                    <div className="font-mono text-blue-600 text-lg">
-                       T: {selections.thickness || '_'} | L: {selections.length || '_'} | W: {selections.width || '_'}
-                    </div>
-                    <div className="w-auto text-right">
-                        <p className="text-sm text-gray-500 font-mono">{reportFileName}</p>
-                    </div> 
-                </div>
-                <div className="grid gap-4 grid-cols-1 md:grid-cols-[1fr_4fr_3fr_2fr]">
-                    <div>
-                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">THICKNESS</h2>
+        <div className="bg-gray-100 min-h-screen p-2 sm:p-4 font-sans">
+            <div className="max-w-full mx-auto">
+                {/* Header */}
+                <header className="flex flex-wrap justify-between items-center mb-4 p-4 bg-white rounded-lg shadow">
+                    <div className="flex items-center space-x-2 sm:space-x-4">
+                        <label className="font-semibold text-sm sm:text-base">Thickness:</label>
                         <select
-                            value={selections.thickness}
-                            onChange={(e) => setSelections({...selections, thickness: parseFloat(e.target.value)})}
-                            className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            value={selectedThickness}
+                            onChange={(e) => setSelectedThickness(parseFloat(e.target.value))}
+                            className="p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm sm:text-base"
                         >
-                            {thicknessData.map(value => <option key={`t-opt-${value}`} value={value}>{value}</option>)}
+                            {thicknessData.map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
+                        <button onClick={handleUndo} className="p-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 font-semibold text-sm sm:text-base">
+                            Undo
+                        </button>
                     </div>
-                    <div>
-                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Length(Feet)</h2>
-                        <div className="grid grid-rows-13 grid-cols-4 gap-3">
-                            {lengthData.map(value => (
-                                <GridButton
-                                    key={`len-${value}`}
-                                    value={value}
-                                    group="length"
-                                    onClick={handleButtonClick}
-                                    isHighlighted={selections.length === value}
-                                />
-                            ))}
+                    <div className="text-center my-2 w-full sm:w-auto">
+                        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Multi-Length Counting</h1>
+                        <div className="mt-2 p-2 bg-blue-100 text-blue-800 rounded-lg font-mono text-base sm:text-lg">
+                            Live Total CFT: <span className="font-bold">{totalCFT.toFixed(4)}</span>
                         </div>
                     </div>
-                    <div>
-                        <h2 className="text-lg font-semibold mb-2 text-center text-gray-700">Width(Inch)</h2>
-                        <div className="space-y-3">
-                            {widthData.map((row, rowIndex) => (
-                                <div key={`w-row-${rowIndex}`} className="grid grid-cols-3 gap-3">
-                                    {row.map(value => (
-                                        <GridButton
-                                            key={`w-${value}`}
-                                            value={value}
-                                            group="width"
-                                            onClick={handleButtonClick}
-                                            isHighlighted={selections.width === value}
-                                            isDisabled={!selections.length}
-                                        />
-                                    ))}
-                                </div>
+                     <div className="flex items-center space-x-2 sm:space-x-4">
+                        <p className="text-xs sm:text-sm text-gray-500 font-mono hidden md:block">{reportFileName}</p>
+                        <button onClick={handleBack} className="p-2 bg-gray-500 text-white rounded hover:bg-gray-600 text-sm sm:text-base">
+                            Back
+                        </button>
+                    </div>
+                </header>
+                {/* Counter Grid */}
+                <main className="overflow-auto bg-white p-4 rounded-lg shadow" style={{maxHeight: 'calc(100vh - 250px)'}}>
+                    <div className="inline-block min-w-full">
+                         <div className="grid grid-cols-[80px_repeat(10,minmax(70px,1fr))] sticky top-0 bg-white z-10 border-b-2 pb-2">
+                            <div className="font-bold p-2 text-center text-gray-600 sticky left-0 bg-white z-20">L / W</div>
+                            {widthData.map(w => (
+                                <div key={w} className="font-bold p-2 text-center text-gray-700 bg-gray-50 rounded">{w}</div>
                             ))}
-                             <div className="mt-4">
-                                <div className="flex items-center justify-center">
-                                    <input
-                                        id="use-quantity"
-                                        type="checkbox"
-                                        checked={useQuantity}
-                                        onChange={(e) => setUseQuantity(e.target.checked)}
-                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                    />
-                                    <label htmlFor="use-quantity" className="ml-2 text-sm font-medium text-gray-700">Use Quantity</label>
-                                </div>
-                                {useQuantity && (
-                                    <div className="mt-2 space-y-2">
-                                        <div className="grid grid-cols-3 gap-3">
-                                            {Array.from({ length: 9 }, (_, i) => i + 2).map(num => (
-                                                <button
-                                                    key={`qty-${num}`}
-                                                    onClick={() => setQuantity(num)}
-                                                    className={`p-3 rounded-lg shadow-sm text-sm transition-all ${
-                                                        quantity === num
-                                                            ? 'bg-indigo-600 text-white ring-2 ring-indigo-400'
-                                                            : 'bg-white text-gray-700 hover:bg-gray-100'
-                                                    }`}
+                        </div>
+                        <div className="divide-y divide-gray-200">
+                            {lengthData.map(l => (
+                                <div key={l} className="grid grid-cols-[80px_repeat(10,minmax(70px,1fr))] items-center">
+                                    <div className="font-bold p-2 text-center text-gray-700 bg-gray-50 h-full flex items-center justify-center sticky left-0 z-10">{l}</div>
+                                    {widthData.map(w => {
+                                        const key = `${selectedThickness}-${l}-${w}`;
+                                        const count = recordedData[key] || 0;
+                                        return (
+                                            <div key={w} className="p-1 sm:p-2 text-center border-l h-full flex flex-col justify-center items-center">
+                                                <button 
+                                                    onClick={() => handleIncrement(l, w)}
+                                                    className="w-8 h-8 bg-blue-500 text-white rounded-full text-lg font-bold hover:bg-blue-600 transition-colors flex items-center justify-center mx-auto"
                                                 >
-                                                    {num}
+                                                    +
                                                 </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+                                                <span className="text-xs sm:text-sm text-gray-600 mt-1 block">{count}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ))}
                         </div>
                     </div>
-                    <div className="flex flex-col items-center space-y-4">
-                        <h2 className="text-lg font-semibold mb-2 text-center text-transparent">Actions</h2>
-                        <div className="w-full">
-                            <GridButton
-                                value="Next"
-                                group="action"
-                                onClick={handleButtonClick}
-                                isSpecial={true}
-                                isDisabled={!selections.length || !selections.width}
-                            />
-                        </div>
-                        <div className="w-full">
-                            <GridButton
-                                value="Reject"
-                                group="action"
-                                onClick={handleButtonClick}
-                                isSpecial={true}
-                                isDisabled={!selections.length || !selections.width}
-                            />
-                        </div>
-                        <div ref={historyBoxRef} className="w-full mt-4 p-2 border rounded-lg bg-gray-50 h-96 overflow-y-auto">
-                            <h3 className="text-md font-semibold text-center text-gray-600 mb-2">Last Entries</h3>
-                            {entryHistory.length > 0 ? (
-                                <ul className="space-y-2">
-                                    {entryHistory.map((entry, index) => (
-                                        <li key={index} className={`p-2 rounded-md text-sm ${entry.status === 'Accepted' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                            <span className="font-bold">Count {index + 1}:</span> T:{entry.thickness}, L:{entry.length}, W:{entry.width} (Qty: {entry.quantity}) - {entry.status}
-                                        </li>
-                                    ))}
-                                </ul>
-                            ) : (
-                                <p className="text-center text-gray-500 text-sm mt-4">No entries yet.</p>
-                            )}
-                        </div>
-                    </div>
-                </div>
-                 <div className="mt-6 flex justify-center items-center gap-4">
-                    <button 
-                        onClick={() => handleButtonClick('Finish', 'action')} 
-                        className="p-3 w-40 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold shadow-md transition-all"
-                    >
-                        Finish
+                </main>
+                 <footer className="mt-6 flex justify-center items-center gap-4">
+                    <button onClick={handleFinish} className="py-2 px-4 sm:py-3 sm:px-6 bg-green-600 text-white text-base sm:text-lg rounded-lg hover:bg-green-700 font-semibold shadow-lg transition-all">
+                        Finish & Save
                     </button>
-                    <button 
-                        onClick={handleReset} 
-                        className="p-3 w-40 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold shadow-md transition-all"
-                    >
+                    <button onClick={handleReset} className="py-2 px-4 sm:py-3 sm:px-6 bg-red-600 text-white text-base sm:text-lg rounded-lg hover:bg-red-700 font-semibold shadow-lg transition-all">
                         Reset
                     </button>
-                </div>
+                </footer>
             </div>
         </div>
     );

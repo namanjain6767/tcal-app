@@ -1,7 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import api from '../api';
+import axios from 'axios';
 
-export default function LogsPage({ setPage, handleBack, user }) {
+
+const API_URL = import.meta.env.VITE_API_URL;
+
+const getAuthToken = () => localStorage.getItem('token');
+
+const api = axios.create({
+    baseURL: API_URL,
+    headers: {
+        'Content-Type': 'application/json',
+    },
+});
+
+api.interceptors.request.use(config => {
+    const token = getAuthToken();
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+});
+
+export default function LogsPage({ setPage }) {
     const [logs, setLogs] = useState([]);
 
     useEffect(() => {
@@ -15,18 +35,18 @@ export default function LogsPage({ setPage, handleBack, user }) {
         };
         fetchLogs();
     }, []);
-    
-    const downloadLog = (content, name) => {
+
+    const downloadLog = (logContent, logName) => {
         const element = document.createElement("a");
-        const file = new Blob([content], {type: 'text/plain'});
+        const file = new Blob([logContent], {type: 'text/plain'});
         element.href = URL.createObjectURL(file);
-        element.download = name;
-        document.body.appendChild(element); 
+        element.download = logName;
+        document.body.appendChild(element);
         element.click();
     };
 
     const handleDeleteLog = async (logId) => {
-         if (window.confirm("Are you sure you want to delete this log?")) {
+        if (window.confirm("Are you sure you want to delete this log?")) {
             try {
                 await api.delete(`/logs/${logId}`);
                 setLogs(logs.filter(log => log.id !== logId));
@@ -38,15 +58,12 @@ export default function LogsPage({ setPage, handleBack, user }) {
 
     return (
         <div className="p-8 max-w-4xl mx-auto">
-            <button onClick={handleBack} className="mb-6 p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back</button>
-            <h1 className="text-3xl font-bold mb-6">Session Logs</h1>
+            <button onClick={() => setPage('dashboard')} className="mb-6 p-2 bg-gray-500 text-white rounded hover:bg-gray-600">Back to Dashboard</button>
+            <h1 className="text-3xl font-bold mb-6">Saved Logs</h1>
             <div className="bg-white p-6 rounded-lg shadow-md">
-                 {logs.length > 0 ? logs.map(log => (
-                    <div key={log.id} className="flex justify-between items-center p-3 border-b hover:bg-gray-50">
-                        <div>
-                             <p className="font-semibold">{log.log_name}</p>
-                             {user?.role === 'owner' && <p className="text-sm text-gray-500">Created by: {log.name} {log.surname}</p>}
-                        </div>
+                {logs.length > 0 ? logs.map(log => (
+                    <div key={log.id} className="flex justify-between items-center p-2 border-b">
+                        <span>{log.log_name}</span>
                         <div className="space-x-2">
                             <button onClick={() => downloadLog(log.log_content, log.log_name)} className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700">Download</button>
                             <button onClick={() => handleDeleteLog(log.id)} className="p-2 bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
@@ -57,4 +74,3 @@ export default function LogsPage({ setPage, handleBack, user }) {
         </div>
     );
 }
-
