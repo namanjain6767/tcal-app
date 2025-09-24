@@ -13,7 +13,6 @@ const server = http.createServer(app);
 
 const allowedOrigins = [
       'http://localhost:5173',
-//    'https://astounding-liger-a7f504.netlify.app' // Your live Netlify URL
       'https://draveta.vercel.app'
 
 ];
