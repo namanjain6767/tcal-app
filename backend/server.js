@@ -13,8 +13,8 @@ const server = http.createServer(app);
 
 // --- CORS Configuration ---
 const allowedOrigins = [
-    'http://localhost:5173',
-    'https://draveta.vercel.app' // Your live Netlify URL
+    'https://draveta.vercel.app', 
+    'http://localhost:5173'  
 ];
 app.use(cors({
     origin: function (origin, callback) {
