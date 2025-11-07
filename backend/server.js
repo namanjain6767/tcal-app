@@ -11,10 +11,10 @@ const url = require('url');
 const app = express();
 const server = http.createServer(app);
 
+// --- CORS Configuration ---
 const allowedOrigins = [
-      'http://localhost:5173',
-      'https://draveta.vercel.app'
-
+    'http://localhost:5173',
+    'https://draveta.vercel.app' // Your live Netlify URL
 ];
 app.use(cors({
     origin: function (origin, callback) {
@@ -33,52 +33,145 @@ const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
 });
 
+// --- Create Tables ---
+(async () => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                name VARCHAR(100),
+                surname VARCHAR(100),
+                phone VARCHAR(50),
+                is_admin BOOLEAN DEFAULT FALSE,
+                last_login_ip VARCHAR(50),
+                allowed_ip VARCHAR(50),
+                role VARCHAR(50) DEFAULT 'counter',
+                organization VARCHAR(255)
+            );
+        `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS reports (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                file_name VARCHAR(255),
+                report_data JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS logs (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                log_name VARCHAR(255),
+                log_content TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS drafts (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                draft_name VARCHAR(255),
+                draft_data JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        // --- NEW TABLE FOR JOB SHEETS ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS products (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                product_name VARCHAR(255) NOT NULL,
+                product_code VARCHAR(100),
+                item_size VARCHAR(100),
+                parts JSONB,
+                organization VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        
+        // --- UPDATED TASKS TABLE ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS tasks (
+                id SERIAL PRIMARY KEY,
+                product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+                product_name VARCHAR(255),
+                assigned_by_user_id INTEGER REFERENCES users(id),
+                assigned_to_user_id INTEGER REFERENCES users(id),
+                organization VARCHAR(255),
+                quantity INTEGER NOT NULL,
+                status VARCHAR(50) DEFAULT 'pending',
+                assign_date DATE,
+                expiry_date DATE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP,
+                completed_data JSONB
+            );
+        `);
+    } catch (err) {
+        console.error("Error creating tables:", err);
+    }
+})();
+
 // --- JWT Secret Key ---
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // --- WebSocket Server Setup ---
 const wss = new WebSocket.Server({ server });
-
-const clients = new Map(); // Maps userId to WebSocket connection
+const clients = new Map();
 
 wss.on('connection', async (ws, req) => {
     const token = url.parse(req.url, true).query.token;
-    if (!token) {
-        return ws.close();
-    }
+    if (!token) return ws.close();
 
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const userId = decoded.id;
         clients.set(userId, ws);
 
         ws.on('message', async (message) => {
             const data = JSON.parse(message);
             
-            if (data.type === 'CFT_UPDATE') {
-                try {
-                    const result = await pool.query('SELECT id FROM users WHERE organization = $1 AND role = $2', [decoded.organization, 'owner']);
-                    result.rows.forEach(owner => {
-                        const ownerSocket = clients.get(owner.id);
-                        if (ownerSocket && ownerSocket.readyState === WebSocket.OPEN) {
-                            ownerSocket.send(JSON.stringify({ 
-                                type: 'CFT_UPDATE', 
-                                cft: data.cft, 
-                                counterId: userId, 
-                                counterName: `${decoded.name} ${decoded.surname}` 
-                            }));
-                        }
-                    });
-                } catch (dbError) {
-                    console.error("WebSocket DB Error:", dbError);
-                }
+            // Find all owners of the same organization to broadcast to them
+            try {
+                const result = await pool.query('SELECT id FROM users WHERE organization = $1 AND role = $2', [decoded.organization, 'owner']);
+                const owners = result.rows;
+
+                owners.forEach(owner => {
+                    const ownerSocket = clients.get(owner.id);
+                    if (ownerSocket && ownerSocket.readyState === WebSocket.OPEN) {
+                        // Forward the original message (could be CFT_UPDATE or FILENAME_UPDATE)
+                        ownerSocket.send(JSON.stringify({ 
+                            ...data,
+                            counterId: userId, 
+                            counterName: `${decoded.name} ${decoded.surname}` 
+                        }));
+                    }
+                });
+            } catch (dbError) {
+                console.error("WebSocket DB Error:", dbError);
             }
         });
 
         ws.on('close', () => {
             clients.delete(userId);
+             // Notify owners that a counter has disconnected
+            try {
+                pool.query('SELECT id FROM users WHERE organization = $1 AND role = $2', [decoded.organization, 'owner'])
+                    .then(result => {
+                        result.rows.forEach(owner => {
+                            const ownerSocket = clients.get(owner.id);
+                            if (ownerSocket && ownerSocket.readyState === WebSocket.OPEN) {
+                                ownerSocket.send(JSON.stringify({ type: 'COUNTER_DISCONNECTED', counterId: userId }));
+                            }
+                        });
+                    });
+            } catch (dbError) {
+                console.error("Error notifying owners of disconnect:", dbError);
+            }
         });
-
     } catch (err) {
         ws.close();
     }
@@ -162,6 +255,24 @@ app.get('/api/users', authenticate, async (req, res) => {
     }
 });
 
+// --- GET COUNTERS (for Owners) ---
+app.get('/api/users/counters', authenticate, async (req, res) => {
+    const { organization, role } = req.user;
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Forbidden' });
+    }
+    try {
+        const result = await pool.query(
+            "SELECT id, name, surname FROM users WHERE organization = $1 AND role = 'counter'",
+            [organization]
+        );
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Counters Error:", error);
+        res.status(500).send({ error: 'Failed to fetch counters.' });
+    }
+});
+
 app.delete('/api/users/:id', authenticate, async (req, res) => {
     if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
     try {
@@ -184,7 +295,6 @@ app.post('/api/users/:id/lock-ip', authenticate, async (req, res) => {
     }
 });
 
-// --- UPDATED Report & Log Endpoints ---
 app.get('/api/reports', authenticate, async (req, res) => {
     const { id, role, organization } = req.user;
     try {
@@ -199,10 +309,7 @@ app.get('/api/reports', authenticate, async (req, res) => {
                 [organization]
             );
         } else {
-            result = await pool.query(
-                'SELECT * FROM reports WHERE user_id = $1 ORDER BY created_at DESC', 
-                [id]
-            );
+            result = await pool.query('SELECT * FROM reports WHERE user_id = $1 ORDER BY created_at DESC', [id]);
         }
         res.status(200).json(result.rows);
     } catch (error) {
@@ -225,10 +332,7 @@ app.get('/api/logs', authenticate, async (req, res) => {
                 [organization]
             );
         } else {
-            result = await pool.query(
-                'SELECT * FROM logs WHERE user_id = $1 ORDER BY created_at DESC', 
-                [id]
-            );
+            result = await pool.query('SELECT * FROM logs WHERE user_id = $1 ORDER BY created_at DESC', [id]);
         }
         res.status(200).json(result.rows);
     } catch (error) {
@@ -237,7 +341,6 @@ app.get('/api/logs', authenticate, async (req, res) => {
     }
 });
 
-// Other endpoints remain the same
 app.post('/api/reports', authenticate, async (req, res) => {
     const userId = req.user.id;
     const { reportData, fileName } = req.body;
@@ -324,9 +427,207 @@ app.delete('/api/logs/:id', authenticate, async (req, res) => {
     }
 });
 
+// --- PRODUCT API ENDPOINTS ---
+app.get('/api/products', authenticate, async (req, res) => {
+    const { organization } = req.user;
+    try {
+        const result = await pool.query(
+            'SELECT * FROM products WHERE organization = $1 ORDER BY created_at DESC',
+            [organization]
+        );
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Products Error:", error);
+        res.status(500).send({ error: 'Failed to fetch products.' });
+    }
+});
+
+app.get('/api/products/part-names', authenticate, async (req, res) => {
+    const { organization } = req.user;
+    try {
+        const result = await pool.query(
+            'SELECT parts FROM products WHERE organization = $1',
+            [organization]
+        );
+        const allParts = result.rows.flatMap(row => row.parts || []);
+        const partNames = allParts.map(part => part.part_name);
+        const uniquePartNames = [...new Set(partNames)].filter(Boolean); 
+        res.status(200).json(uniquePartNames);
+    } catch (error) {
+        console.error("Fetch Part Names Error:", error);
+        res.status(500).send({ error: 'Failed to fetch part names.' });
+    }
+});
+
+app.post('/api/products', authenticate, async (req, res) => {
+    const { id: userId, organization } = req.user;
+    const { productName, productCode, itemSize, parts } = req.body;
+
+    if (!productName || !parts || parts.length === 0) {
+        return res.status(400).send({ error: 'Product name and parts are required.' });
+    }
+
+    try {
+        const result = await pool.query(
+            'INSERT INTO products (user_id, product_name, product_code, item_size, parts, organization) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [userId, productName, productCode, itemSize, JSON.stringify(parts), organization]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error("Save Product Error:", error);
+        res.status(500).send({ error: 'Failed to save product.' });
+    }
+});
+
+app.put('/api/products/:id', authenticate, async (req, res) => {
+    const { id: userId, organization, role } = req.user;
+    const { id } = req.params;
+    const { productName, productCode, itemSize, parts } = req.body;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can update products.' });
+    }
+    if (!productName || !parts || parts.length === 0) {
+        return res.status(400).send({ error: 'Product name and parts are required.' });
+    }
+
+    try {
+        const result = await pool.query(
+            'UPDATE products SET product_name = $1, product_code = $2, item_size = $3, parts = $4 WHERE id = $5 AND organization = $6 RETURNING *',
+            [productName, productCode, itemSize, JSON.stringify(parts), id, organization]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).send({ error: 'Product not found or permission denied.' });
+        }
+        res.status(200).json(result.rows[0]);
+    } catch (error) {
+        console.error("Update Product Error:", error);
+        res.status(500).send({ error: 'Failed to update product.' });
+    }
+});
+
+app.delete('/api/products/:id', authenticate, async (req, res) => {
+    const { organization, role } = req.user;
+    const { id } = req.params;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can delete products.' });
+    }
+
+    try {
+        const result = await pool.query(
+            'DELETE FROM products WHERE id = $1 AND organization = $2',
+            [id, organization]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).send({ error: 'Product not found or permission denied.' });
+        }
+        res.status(200).send({ message: 'Product deleted successfully' });
+    } catch (error) {
+        console.error("Delete Product Error:", error);
+        res.status(500).send({ error: 'Failed to delete product.' });
+    }
+});
+
+
+// --- TASK API ENDPOINTS ---
+app.get('/api/tasks', authenticate, async (req, res) => {
+    const { organization, id: userId, role } = req.user;
+    let query;
+    let params;
+
+    if (role === 'owner') {
+        // Owners see all tasks for their org
+        query = "SELECT t.*, p.parts, u.name as assigned_to_name FROM tasks t JOIN products p ON t.product_id = p.id LEFT JOIN users u ON t.assigned_to_user_id = u.id WHERE t.organization = $1 ORDER BY t.created_at DESC";
+        params = [organization];
+    } else {
+        // Counters only see tasks assigned to them
+        query = "SELECT t.*, p.parts FROM tasks t JOIN products p ON t.product_id = p.id WHERE t.organization = $1 AND t.assigned_to_user_id = $2 ORDER BY t.status, t.created_at DESC";
+        params = [organization, userId];
+    }
+
+    try {
+        const result = await pool.query(query, params);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Tasks Error:", error);
+        res.status(500).send({ error: 'Failed to fetch tasks.' });
+    }
+});
+
+app.post('/api/tasks', authenticate, async (req, res) => {
+    const { id: userId, organization, role } = req.user;
+    const { productId, productName, quantity, assignedToUserId, assignDate, expiryDate } = req.body;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can assign tasks.' });
+    }
+    if (!productId || !quantity || quantity <= 0 || !assignedToUserId || !assignDate || !expiryDate) {
+        return res.status(400).send({ error: 'All fields are required.' });
+    }
+
+    try {
+        const result = await pool.query(
+            'INSERT INTO tasks (product_id, product_name, assigned_by_user_id, assigned_to_user_id, organization, quantity, status, assign_date, expiry_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+            [productId, productName, userId, assignedToUserId, organization, quantity, 'pending', assignDate, expiryDate]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error("Assign Task Error:", error);
+        res.status(500).send({ error: 'Failed to assign task.' });
+    }
+});
+
+app.put('/api/tasks/:id/complete', authenticate, async (req, res) => {
+    const { id: userId, role } = req.user;
+    const { id } = req.params;
+    const recordedData = req.body; // Get the counter's data from the request body
+
+    if (role !== 'counter') {
+        return res.status(403).send({ error: 'Only counters can complete tasks.' });
+    }
+
+    try {
+        const result = await pool.query(
+            "UPDATE tasks SET status = 'completed', completed_at = CURRENT_TIMESTAMP, completed_data = $1 WHERE id = $2 AND assigned_to_user_id = $3 RETURNING *",
+            [JSON.stringify(recordedData), id, userId] // Save the recordedData
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).send({ error: 'Task not found or you are not authorized.' });
+        }
+        res.status(200).json(result.rows[0]);
+    } catch (error) {
+        console.error("Complete Task Error:", error);
+        res.status(500).send({ error: 'Failed to complete task.' });
+    }
+});
+
+app.delete('/api/tasks/:id', authenticate, async (req, res) => {
+    const { organization, role } = req.user;
+    const { id } = req.params;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can delete tasks.' });
+    }
+
+    try {
+        const result = await pool.query(
+            'DELETE FROM tasks WHERE id = $1 AND organization = $2',
+            [id, organization]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).send({ error: 'Task not found or permission denied.' });
+        }
+        res.status(200).send({ message: 'Task deleted successfully' });
+    } catch (error) {
+        console.error("Delete Task Error:", error);
+        res.status(500).send({ error: 'Failed to delete task.' });
+    }
+});
+
+
 // --- Start the Server ---
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
-

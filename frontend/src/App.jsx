@@ -13,16 +13,31 @@ import SingleLengthPage from './pages/SingleLengthPage';
 import VehicleInfoPage from './pages/VehicleInfoPage';
 import HomePage from './pages/HomePage';
 import AppsListPage from './pages/AppsListPage';
+import JobSheetPage from './pages/JobSheetPage'; // Import the new page
 
 // --- Helper function to get the auth token from local storage ---
 const getAuthToken = () => localStorage.getItem('token');
+// --- Helper function to get the last page from local storage ---
+const getLastPage = () => localStorage.getItem('currentPage') || 'home';
+
 
 export default function App() {
     const [token, setToken] = useState(getAuthToken());
     const [user, setUser] = useState(null);
-    const [page, setPage] = useState('home');
+    // Initialize page state from localStorage to persist on refresh
+    const [page, setPage] = useState(getLastPage());
     const [activeDraft, setActiveDraft] = useState(null);
     const [sessionInfo, setSessionInfo] = useState(null);
+    const [loginRedirect, setLoginRedirect] = useState(null); 
+
+    // --- Save the current page to localStorage ---
+    useEffect(() => {
+        // Only save "app" pages, not public ones (to avoid getting stuck on 'login')
+        const protectedPages = ['dashboard', 'ownerDashboard', 'app', 'admin', 'reports', 'logs', 'singleLength', 'jobSheet'];
+        if (protectedPages.includes(page)) {
+            localStorage.setItem('currentPage', page);
+        }
+    }, [page]);
 
     useEffect(() => {
         if (token) {
@@ -30,11 +45,26 @@ export default function App() {
                 localStorage.setItem('token', token);
                 const decodedUser = jwtDecode(token);
                 setUser(decodedUser);
-                if (decodedUser.role === 'owner') {
-                    setPage('ownerDashboard');
-                } else {
-                    setPage('dashboard');
+                
+                // Only redirect if we are on a public page (login, home, etc.)
+                if (page === 'login' || page === 'home' || page === 'appsList') {
+                    // Check for a specific page to redirect to
+                    if (loginRedirect && loginRedirect.page) {
+                        // If the redirect is for a generic dashboard, check role
+                        if (loginRedirect.page === 'dashboard') {
+                            setPage(decodedUser.role === 'owner' ? 'ownerDashboard' : 'dashboard');
+                        } else {
+                            // Otherwise, go to the specific page (e.g., 'jobSheet')
+                            setPage(loginRedirect.page);
+                        }
+                        setLoginRedirect(null); // Clear the redirect
+                    } else {
+                        // Otherwise, go to the default dashboard
+                        setPage(decodedUser.role === 'owner' ? 'ownerDashboard' : 'dashboard');
+                    }
                 }
+                // If we are on a protected page (like jobSheet) and refresh,
+                // the 'if' block above is false, so we correctly stay on the page.
             } catch (e) {
                 localStorage.removeItem('token');
                 setToken(null);
@@ -43,35 +73,46 @@ export default function App() {
         } else {
             localStorage.removeItem('token');
             setUser(null);
-            setPage('home');
+            // Public pages that don't require login
+            const publicPages = ['home', 'appsList', 'login']; // 'jobSheet' is now protected
+            // If on a protected page, redirect to home
+            if (!publicPages.includes(page)) {
+                setPage('home');
+            }
         }
-    }, [token]);
+    }, [token, loginRedirect]); // Removed 'page' from dependency array to prevent loops
 
     const handleLoginSuccess = (newToken) => {
-        setToken(newToken);
+        setToken(newToken); // This will trigger the useEffect, which now handles redirects
     };
     
     const handleLogout = () => {
-        localStorage.clear();
+        localStorage.removeItem('token'); // Only remove token, not all local storage
+        localStorage.removeItem('currentPage'); // Clear last page on logout
         setActiveDraft(null);
         setSessionInfo(null);
         setToken(null);
+        setLoginRedirect(null); // Clear redirect on logout
     };
 
-    // This function now checks the user's role to determine the correct dashboard
     const handleBackToDashboard = () => {
         if (user?.role === 'owner') {
             setPage('ownerDashboard');
-        } else {
+        } else if (user?.role === 'counter') {
             setPage('dashboard');
+        } else {
+            // If no user (e.g., from jobSheet), go back to the apps list
+            setPage('appsList');
         }
     };
 
     const renderPage = () => {
         switch (page) {
             case 'home': return <HomePage setPage={setPage} />;
-            case 'appsList': return <AppsListPage setPage={setPage} />;
-            case 'login': return <LoginPage setPage={setPage} onLoginSuccess={handleLoginSuccess} />;
+            // Pass user and the redirect setter to AppsListPage
+            case 'appsList': return <AppsListPage setPage={setPage} user={user} setLoginRedirect={setLoginRedirect} />;
+            {/* Pass redirectInfo to LoginPage */}
+            case 'login': return <LoginPage setPage={setPage} onLoginSuccess={handleLoginSuccess} redirectInfo={loginRedirect} />;
             case 'dashboard': return <DashboardPage setPage={setPage} handleLogout={handleLogout} user={user} />;
             case 'ownerDashboard': return <OwnerDashboardPage setPage={setPage} handleLogout={handleLogout} user={user} />;
             case 'vehicleInfo': return <VehicleInfoPage setPage={setPage} setSessionInfo={setSessionInfo} handleBack={handleBackToDashboard} />;
@@ -80,10 +121,10 @@ export default function App() {
             case 'reports': return <ReportsPage setPage={setPage} setActiveDraft={setActiveDraft} handleBack={handleBackToDashboard} user={user} />;
             case 'logs': return <LogsPage setPage={setPage} handleBack={handleBackToDashboard} user={user} />;
             case 'singleLength': return <SingleLengthPage user={user} setPage={setPage} activeDraft={activeDraft} setActiveDraft={setActiveDraft} handleBack={handleBackToDashboard} />;
+            case 'jobSheet': return <JobSheetPage setPage={setPage} handleBack={handleBackToDashboard} handleLogout={handleLogout} user={user} />;
             default: return <HomePage setPage={setPage} />;
         }
     };
 
     return <div className="min-h-screen">{renderPage()}</div>;
 }
-

@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import api from '../api';
 
-export default function LoginPage({ setPage, onLoginSuccess }) {
+export default function LoginPage({ setPage, onLoginSuccess, redirectInfo }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+
+    // Determine the login title based on redirectInfo
+    const loginTitle = redirectInfo ? `Login to ${redirectInfo.appName}` : 'Login to T-CAL';
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -13,8 +16,6 @@ export default function LoginPage({ setPage, onLoginSuccess }) {
         setIsLoading(true);
         try {
             const response = await api.post('/login', { email, password });
-            // On success, just pass the token up to the main App component.
-            // App.jsx will handle all state changes and navigation.
             onLoginSuccess(response.data.token);
         } catch (err) {
             setError(err.response?.data?.error || 'Login failed. Please check your credentials.');
@@ -25,7 +26,7 @@ export default function LoginPage({ setPage, onLoginSuccess }) {
     return (
         <div className="flex items-center justify-center min-h-screen">
             <div className="p-8 bg-white rounded-lg shadow-md w-96">
-                <h1 className="text-2xl font-bold mb-6 text-center">Login to T-CAL</h1>
+                <h1 className="text-2xl font-bold mb-6 text-center">{loginTitle}</h1>
                 <form onSubmit={handleLogin}>
                     <div className="mb-4">
                         <input 
@@ -58,14 +59,13 @@ export default function LoginPage({ setPage, onLoginSuccess }) {
                 </form>
                  <div className="mt-4 text-center">
                     <button 
-                        onClick={() => setPage('home')} 
+                        onClick={() => setPage('appsList')} 
                         className="text-sm text-gray-600 hover:text-gray-800"
                     >
-                        Back to Home
+                        Back to Apps
                     </button>
                 </div>
             </div>
         </div>
     );
 }
-

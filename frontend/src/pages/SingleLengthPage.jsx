@@ -21,7 +21,7 @@ const LockIcon = ({ locked }) => (
 );
 
 // --- Reusable Counter Grid Component ---
-const CounterGrid = ({ length, widthData, thickness, onIncrement, recordedData, cft }) => (
+const CounterGrid = ({ length, widthData, thickness, onIncrement, recordedData, cft, lastClickedKey }) => (
     <div className="overflow-x-auto bg-white p-4 rounded-lg shadow">
         <div className="flex justify-between items-center mb-2">
             <h3 className="font-bold text-lg">Length: {length}</h3>
@@ -33,10 +33,27 @@ const CounterGrid = ({ length, widthData, thickness, onIncrement, recordedData, 
             {widthData.map(w => {
                 const key = `${thickness}-${length}-${w}`;
                 const count = recordedData[key] || 0;
+                const isFlashing = lastClickedKey === key;
+                
+                let cellBgClass = 'bg-gray-50'; // Default
+                if (isFlashing) {
+                    cellBgClass = 'bg-blue-300'; // Flash color
+                } else if (count > 0) {
+                    cellBgClass = 'bg-blue-100'; // Resting color
+                }
+
                 return (
-                    <div key={w} className="p-2 text-center rounded-lg bg-gray-50 border">
+                    <div 
+                        key={w} 
+                        className={`p-2 text-center rounded-lg border ${cellBgClass}`}
+                    >
                         <div className="font-bold mb-2">{w}</div>
-                        <button onClick={() => onIncrement(length, w)} className="w-10 h-10 bg-blue-500 text-white rounded-full text-xl font-bold hover:bg-blue-600 transition-colors flex items-center justify-center mx-auto">+</button>
+                        <button 
+                            onClick={() => onIncrement(length, w)} 
+                            className="w-10 h-10 bg-blue-500 text-white rounded-full text-xl font-bold hover:bg-blue-600 transition-colors flex items-center justify-center mx-auto"
+                        >
+                            +
+                        </button>
                         <span className="text-sm text-gray-600 mt-1 block">{count}</span>
                     </div>
                 )
@@ -45,39 +62,64 @@ const CounterGrid = ({ length, widthData, thickness, onIncrement, recordedData, 
     </div>
 );
 
+
 export default function SingleLengthPage({ user, setPage, handleBack, activeDraft, setActiveDraft }) {
     // --- Static Data ---
     const thicknessData = [0.75, 1, 1.5, 2, 2.5, 3];
     const lengthIntegerData = Array.from({ length: 15 }, (_, i) => i + 1);
     const lengthDecimalData = [0, 0.25, 0.5, 0.75];
     const widthData = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    const lengthCountOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
     // --- State Management ---
-    const [selections, setSelections] = useState({
-        thickness: thicknessData[0],
-        length1Int: lengthIntegerData[0],
-        length1Dec: lengthDecimalData[0],
-        length2Int: lengthIntegerData[3],
-        length2Dec: lengthDecimalData[0],
-    });
-    const [locks, setLocks] = useState({ thickness: false, length1: false, length2: false });
+    const [selectedThickness, setSelectedThickness] = useState(thicknessData[0]);
+    const [isThicknessLocked, setIsThicknessLocked] = useState(false);
+    
+    const [numberOfLengths, setNumberOfLengths] = useState(2);
+    const [isLengthCountLocked, setIsLengthCountLocked] = useState(false);
+
+    const [lengths, setLengths] = useState(
+        Array.from({ length: 2 }, (_, i) => ({
+            id: i,
+            int: lengthIntegerData[i * 3], 
+            dec: lengthDecimalData[0],
+            isLocked: false,
+        }))
+    );
+    
     const [recordedData, setRecordedData] = useState({});
     const [incrementHistory, setIncrementHistory] = useState([]);
+    const [entryHistory, setEntryHistory] = useState([]); // For logging
     const [reportFileName, setReportFileName] = useState('');
+    const [lastClickedKey, setLastClickedKey] = useState(null); 
     const ws = useRef(null);
 
     // --- WebSocket Connection ---
     useEffect(() => {
+        // --- FIX: Add guard clause to wait for user object ---
+        if (!user || user.role !== 'counter') return;
+        
         const token = localStorage.getItem('token');
-        if (!token || user.role !== 'counter') return;
+        if (!token) return;
+        
         const wsUrl = `${getWebSocketURL()}?token=${token}`;
         ws.current = new WebSocket(wsUrl);
-        ws.current.onopen = () => console.log('Single Length Counter WebSocket Connected');
-        ws.current.onclose = () => console.log('Single Length Counter WebSocket disconnected');
         return () => { if (ws.current) ws.current.close(); };
-    }, [user.role]);
+    }, [user]); // Depend on user object
     
-    // --- Generate Filename ---
+    // --- Load Data on Mount ---
+    useEffect(() => {
+        if (activeDraft) {
+            setRecordedData(activeDraft.draft_data || {});
+        } else {
+            const savedData = localStorage.getItem('singleLengthLocalData');
+            if (savedData) {
+                setRecordedData(JSON.parse(savedData));
+            }
+        }
+    }, [activeDraft]);
+    
+    // --- Filename Generation ---
     const generateNewFileName = () => {
         const today = new Date().toLocaleDateString();
         const lastReportDate = localStorage.getItem('lastSingleLengthReportDate');
@@ -120,32 +162,22 @@ export default function SingleLengthPage({ user, setPage, handleBack, activeDraf
         }
         return total;
     }, [recordedData]);
-
-    const cftLength1 = useMemo(() => {
-        let total = 0;
-        const length1 = selections.length1Int + selections.length1Dec;
-        for (const key in recordedData) {
-            const [t, l, w] = key.split('-').map(Number);
-            if (l === length1) {
-                const count = recordedData[key];
-                total += (t * l * w * count) / 144;
+    
+    // Calculate CFT for each dynamic length
+    const lengthCFTs = useMemo(() => {
+        return lengths.map(len => {
+            let total = 0;
+            const lengthValue = len.int + len.dec;
+            for (const key in recordedData) {
+                const [t, l, w] = key.split('-').map(Number);
+                if (l === lengthValue && t === selectedThickness) {
+                    const count = recordedData[key];
+                    total += (t * l * w * count) / 144;
+                }
             }
-        }
-        return total;
-    }, [recordedData, selections.thickness, selections.length1Int, selections.length1Dec]);
-
-    const cftLength2 = useMemo(() => {
-        let total = 0;
-        const length2 = selections.length2Int + selections.length2Dec;
-        for (const key in recordedData) {
-            const [t, l, w] = key.split('-').map(Number);
-            if (l === length2) {
-                const count = recordedData[key];
-                total += (t * l * w * count) / 144;
-            }
-        }
-        return total;
-    }, [recordedData, selections.thickness, selections.length2Int, selections.length2Dec]);
+            return total;
+        });
+    }, [recordedData, selectedThickness, lengths]);
 
     useEffect(() => {
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
@@ -153,52 +185,130 @@ export default function SingleLengthPage({ user, setPage, handleBack, activeDraf
         }
     }, [totalCFT]);
     
-    const length1 = selections.length1Int + selections.length1Dec;
-    const length2 = selections.length2Int + selections.length2Dec;
-
-    const handleSelectionChange = (type, value) => {
-        setSelections(prev => ({ ...prev, [type]: value }));
-        const lengthToReset = type.includes('1') ? length1 : length2;
-        const newRecordedData = { ...recordedData };
-        const newHistory = incrementHistory.filter(item => {
-            const [t, l, w] = item.split('-').map(Number);
-            return l !== lengthToReset;
-        });
-        Object.keys(newRecordedData).forEach(key => {
-            if (key.startsWith(`${selections.thickness}-${lengthToReset}-`)) {
-                delete newRecordedData[key];
+    // --- Flash Effect Logic ---
+    useEffect(() => {
+        if (lastClickedKey) {
+            const timer = setTimeout(() => {
+                setLastClickedKey(null);
+            }, 100); // Flash duration (100ms)
+            return () => clearTimeout(timer);
+        }
+    }, [lastClickedKey]);
+    
+    // --- Dynamic Length Panel Logic ---
+    useEffect(() => {
+        setLengths(currentLengths => {
+            const newLength = parseInt(numberOfLengths, 10);
+            const oldLength = currentLengths.length;
+            if (newLength > oldLength) {
+                const newItems = Array.from({ length: newLength - oldLength }, (_, i) => ({
+                    id: oldLength + i,
+                    int: lengthIntegerData[0],
+                    dec: lengthDecimalData[0],
+                    isLocked: false,
+                }));
+                return [...currentLengths, ...newItems];
+            } else if (newLength < oldLength) {
+                const lengthsToReset = currentLengths.slice(newLength);
+                const newRecordedData = { ...recordedData };
+                lengthsToReset.forEach(lenObj => {
+                    const lVal = lenObj.int + lenObj.dec;
+                    Object.keys(newRecordedData).forEach(key => {
+                        if (key.startsWith(`${selectedThickness}-${lVal}-`)) {
+                            delete newRecordedData[key];
+                        }
+                    });
+                });
+                setRecordedData(newRecordedData);
+                return currentLengths.slice(0, newLength);
             }
+            return currentLengths;
         });
-        setRecordedData(newRecordedData);
-        setIncrementHistory(newHistory);
+    }, [numberOfLengths, lengthIntegerData, lengthDecimalData, selectedThickness]);
+
+    // --- Event Handlers ---
+    const handleThicknessLock = () => {
+        const newLockState = !isThicknessLocked;
+        setIsThicknessLocked(newLockState);
+        if (!newLockState) {
+            // If unlocking thickness, reset everything below it
+            setIsLengthCountLocked(false);
+            setLengths(Array.from({ length: numberOfLengths }, (_, i) => ({
+                id: i,
+                int: lengthIntegerData[i * 3],
+                dec: lengthDecimalData[0],
+                isLocked: false,
+            })));
+            setRecordedData({});
+            setIncrementHistory([]);
+        }
+    };
+    
+    const handleLengthCountLock = () => {
+        const newLockState = !isLengthCountLocked;
+        setIsLengthCountLocked(newLockState);
+        if (!newLockState) {
+            // If unlocking length count, reset all length data and unlock panels
+            setRecordedData({});
+            setIncrementHistory([]);
+            setLengths(currentLengths => 
+                currentLengths.map(l => ({ ...l, isLocked: false }))
+            );
+        }
+    };
+
+    const handleLengthChange = (id, part, value) => {
+        setLengths(currentLengths =>
+            currentLengths.map(len => {
+                if (len.id === id) {
+                    return { ...len, [part]: value };
+                }
+                return len;
+            })
+        );
+    };
+    
+    const handleLockChange = (id) => {
+        setLengths(currentLengths =>
+            currentLengths.map(len =>
+                len.id === id ? { ...len, isLocked: !len.isLocked } : len
+            )
+        );
     };
 
     const handleIncrement = (length, width) => {
-        const key = `${selections.thickness}-${length}-${width}`;
+        const key = `${selectedThickness}-${length}-${width}`;
+        setLastClickedKey(key); // Trigger the flash effect
         const newData = { ...recordedData, [key]: (recordedData[key] || 0) + 1 };
         setRecordedData(newData);
         setIncrementHistory(prev => [...prev, key]);
+        setEntryHistory(prev => [...prev, { key, quantity: 1 }]); // Log the entry
+        localStorage.setItem('singleLengthLocalData', JSON.stringify(newData));
     };
 
     const handleUndo = () => {
-        if (incrementHistory.length === 0) {
-            alert("No action to undo.");
-            return;
-        }
-        const lastKey = incrementHistory[incrementHistory.length - 1];
+        if (incrementHistory.length === 0) return alert("No action to undo.");
+        
+        const lastKey = incrementHistory.pop();
         const currentCount = recordedData[lastKey];
+
         if (currentCount > 0) {
             const newData = { ...recordedData, [lastKey]: currentCount - 1 };
             if (newData[lastKey] === 0) delete newData[lastKey];
             setRecordedData(newData);
-            setIncrementHistory(prev => prev.slice(0, -1));
+            // Also remove from log history
+            setEntryHistory(prev => prev.slice(0, prev.length - 1));
+            localStorage.setItem('singleLengthLocalData', JSON.stringify(newData));
         }
+        setIncrementHistory([...incrementHistory]);
     };
 
     const handleReset = () => {
         if (window.confirm("Are you sure you want to clear all current entries?")) {
             setRecordedData({});
             setIncrementHistory([]);
+            setEntryHistory([]);
+            localStorage.removeItem('singleLengthLocalData');
             alert("Current session has been cleared.");
         }
     };
@@ -211,15 +321,23 @@ export default function SingleLengthPage({ user, setPage, handleBack, activeDraf
         
         generateAndDownloadXLSX(recordedData, reportFileName);
 
+        const logFileName = `${reportFileName.replace('.xlsx', '')}.txt`;
+        let logContent = `SESSION LOG: ${logFileName}\n=============================\n\n`;
+        entryHistory.forEach((entry, index) => {
+            const [t, l, w] = entry.key.split('-');
+            logContent += `Entry ${index + 1}: T:${t}, L:${l}, W:${w}, Qty: ${entry.quantity}\n`;
+        });
+
         try {
             await api.post('/reports', { 
                 reportData: recordedData, 
                 fileName: reportFileName 
             });
-            alert("Report saved successfully!");
+             await api.post('/logs', { logContent, logName: logFileName });
+            alert("Report and log saved successfully!");
         } catch (error) {
-            console.error("Failed to save report:", error);
-            alert("Failed to save the report.");
+            console.error("Failed to save report or log:", error);
+            alert("Failed to save the report or log.");
         }
         
         const today = new Date().toLocaleDateString();
@@ -227,7 +345,10 @@ export default function SingleLengthPage({ user, setPage, handleBack, activeDraf
         localStorage.setItem('lastSingleLengthReportDate', today);
         localStorage.setItem('dailySingleLengthReportCounter', counter);
         
-        handleReset();
+        setRecordedData({});
+        setIncrementHistory([]);
+        setEntryHistory([]);
+        localStorage.removeItem('singleLengthLocalData');
         generateNewFileName();
     };
     
@@ -284,6 +405,11 @@ export default function SingleLengthPage({ user, setPage, handleBack, activeDraf
         
         XLSX.writeFile(wb, fileName);
     };
+    
+    // --- FIX: Add a loading state if user is not yet loaded ---
+    if (!user) {
+        return <div className="p-8 max-w-full mx-auto text-center">Loading...</div>;
+    }
 
     return (
         <div className="bg-gray-100 min-h-screen p-2 sm:p-4 font-sans">
@@ -313,77 +439,83 @@ export default function SingleLengthPage({ user, setPage, handleBack, activeDraf
                         <div className="flex items-center space-x-2">
                             <label className="font-semibold w-24">Thickness:</label>
                             <select
-                                value={selections.thickness}
-                                onChange={(e) => setSelections(s => ({...s, thickness: parseFloat(e.target.value)}))}
-                                disabled={locks.thickness}
+                                value={selectedThickness}
+                                onChange={(e) => setSelectedThickness(parseFloat(e.target.value))}
+                                disabled={isThicknessLocked}
                                 className="p-2 border rounded-lg w-full"
                             >
                                 {thicknessData.map(t => <option key={t} value={t}>{t}</option>)}
                             </select>
-                            <button onClick={() => setLocks(l => ({...l, thickness: !l.thickness}))} className={`py-2 px-3 rounded-lg text-white flex items-center justify-center w-28 transition-colors text-sm font-semibold ${locks.thickness ? 'bg-red-500' : 'bg-green-500'}`}>
-                                <LockIcon locked={locks.thickness} /> {locks.thickness ? 'Unlock' : 'Lock'}
+                            <button onClick={handleThicknessLock} className={`py-2 px-3 rounded-lg text-white flex items-center justify-center w-28 transition-colors text-sm font-semibold ${isThicknessLocked ? 'bg-red-500' : 'bg-green-500'}`}>
+                                <LockIcon locked={isThicknessLocked} /> {isThicknessLocked ? 'Unlock' : 'Lock'}
                             </button>
                         </div>
-                        <div></div> {/* Spacer */}
+                        
+                        {/* Number of Lengths */}
+                        {isThicknessLocked && (
+                            <div className="flex items-center space-x-2">
+                                <label className="font-semibold w-24">Lengths:</label>
+                                <select
+                                    value={numberOfLengths}
+                                    onChange={(e) => setNumberOfLengths(e.target.value)}
+                                    disabled={!isThicknessLocked || isLengthCountLocked}
+                                    className="p-2 border rounded-lg w-full disabled:bg-gray-200"
+                                >
+                                    {lengthCountOptions.map(n => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                                <button onClick={handleLengthCountLock} disabled={!isThicknessLocked} className={`py-2 px-3 rounded-lg text-white flex items-center justify-center w-28 transition-colors text-sm font-semibold ${isLengthCountLocked ? 'bg-red-500' : 'bg-green-500'} disabled:bg-gray-400`}>
+                                    <LockIcon locked={isLengthCountLocked} /> {isLengthCountLocked ? 'Unlock' : 'Lock'}
+                                </button>
+                            </div>
+                        )}
 
-                        {/* Length 1 */}
-                        <div className="flex items-center space-x-2">
-                            <label className="font-semibold w-24">Length 1:</label>
-                            <select
-                                value={selections.length1Int}
-                                onChange={(e) => handleSelectionChange('length1Int', parseInt(e.target.value))}
-                                disabled={!locks.thickness || locks.length1}
-                                className="p-2 border rounded-lg w-full disabled:bg-gray-200"
-                            >
-                                {lengthIntegerData.map(l => <option key={`l1-${l}`} value={l}>{l}</option>)}
-                            </select>
-                            <select
-                                value={selections.length1Dec}
-                                onChange={(e) => handleSelectionChange('length1Dec', parseFloat(e.target.value))}
-                                disabled={!locks.thickness || locks.length1}
-                                className="p-2 border rounded-lg w-full disabled:bg-gray-200"
-                            >
-                                {lengthDecimalData.map(d => <option key={`d1-${d}`} value={d}>{d}</option>)}
-                            </select>
-                            <button onClick={() => setLocks(l => ({...l, length1: !l.length1}))} disabled={!locks.thickness} className={`py-2 px-3 rounded-lg text-white flex items-center justify-center w-28 transition-colors text-sm font-semibold ${locks.length1 ? 'bg-red-500' : 'bg-green-500'} disabled:bg-gray-400`}>
-                                <LockIcon locked={locks.length1} /> {locks.length1 ? 'Unlock' : 'Lock'}
-                            </button>
-                        </div>
-
-                         {/* Length 2 */}
-                        <div className="flex items-center space-x-2">
-                            <label className="font-semibold w-24">Length 2:</label>
-                            <select
-                                value={selections.length2Int}
-                                onChange={(e) => handleSelectionChange('length2Int', parseInt(e.target.value))}
-                                disabled={!locks.thickness || locks.length2}
-                                className="p-2 border rounded-lg w-full disabled:bg-gray-200"
-                            >
-                                {lengthIntegerData.map(l => <option key={`l2-${l}`} value={l}>{l}</option>)}
-                            </select>
-                            <select
-                                value={selections.length2Dec}
-                                onChange={(e) => handleSelectionChange('length2Dec', parseFloat(e.target.value))}
-                                disabled={!locks.thickness || locks.length2}
-                                className="p-2 border rounded-lg w-full disabled:bg-gray-200"
-                            >
-                                {lengthDecimalData.map(d => <option key={`d2-${d}`} value={d}>{d}</option>)}
-                            </select>
-                            <button onClick={() => setLocks(l => ({...l, length2: !l.length2}))} disabled={!locks.thickness} className={`py-2 px-3 rounded-lg text-white flex items-center justify-center w-28 transition-colors text-sm font-semibold ${locks.length2 ? 'bg-red-500' : 'bg-green-500'} disabled:bg-gray-400`}>
-                                <LockIcon locked={locks.length2} /> {locks.length2 ? 'Unlock' : 'Lock'}
-                            </button>
-                        </div>
+                        {/* Dynamic Length Selectors */}
+                        {isThicknessLocked && isLengthCountLocked && lengths.map((len, index) => (
+                            <div key={len.id} className="flex items-center space-x-2 md:col-span-1">
+                                <label className="font-semibold w-24">Length {index + 1}:</label>
+                                <select
+                                    value={len.int}
+                                    onChange={(e) => handleLengthChange(len.id, 'int', parseInt(e.target.value))}
+                                    disabled={len.isLocked}
+                                    className="p-2 border rounded-lg w-full disabled:bg-gray-200"
+                                >
+                                    {lengthIntegerData.map(l => <option key={`l${index}-${l}`} value={l}>{l}</option>)}
+                                </select>
+                                <select
+                                    value={len.dec}
+                                    onChange={(e) => handleLengthChange(len.id, 'dec', parseFloat(e.target.value))}
+                                    disabled={len.isLocked}
+                                    className="p-2 border rounded-lg w-full disabled:bg-gray-200"
+                                >
+                                    {lengthDecimalData.map(d => <option key={`d${index}-${d}`} value={d}>{d}</option>)}
+                                </select>
+                                <button onClick={() => handleLockChange(len.id)} className={`py-2 px-3 rounded-lg text-white flex items-center justify-center w-28 transition-colors text-sm font-semibold ${len.isLocked ? 'bg-red-500' : 'bg-green-500'}`}>
+                                    <LockIcon locked={len.isLocked} /> {len.isLocked ? 'Unlock' : 'Lock'}
+                                </button>
+                            </div>
+                        ))}
                     </div>
                 </div>
 
                 {/* Counter Grids */}
                 <div className="space-y-4">
-                    {locks.length1 && (
-                        <CounterGrid length={length1} widthData={widthData} thickness={selections.thickness} onIncrement={handleIncrement} recordedData={recordedData} cft={cftLength1} />
-                    )}
-                     {locks.length2 && (
-                        <CounterGrid length={length2} widthData={widthData} thickness={selections.thickness} onIncrement={handleIncrement} recordedData={recordedData} cft={cftLength2} />
-                    )}
+                    {isThicknessLocked && isLengthCountLocked && lengths.map((len, index) => {
+                        if (len.isLocked) {
+                            return (
+                                <CounterGrid 
+                                    key={len.id}
+                                    length={len.int + len.dec}
+                                    widthData={widthData} 
+                                    thickness={selectedThickness}
+                                    onIncrement={handleIncrement} 
+                                    recordedData={recordedData} 
+                                    cft={lengthCFTs[index]}
+                                    lastClickedKey={lastClickedKey}
+                                />
+                            );
+                        }
+                        return null;
+                    })}
                 </div>
 
                 {/* Action Buttons */}
@@ -402,4 +534,3 @@ export default function SingleLengthPage({ user, setPage, handleBack, activeDraf
         </div>
     );
 }
-

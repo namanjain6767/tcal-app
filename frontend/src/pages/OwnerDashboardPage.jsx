@@ -4,59 +4,72 @@ import api from '../api';
 const getWebSocketURL = () => {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // Correctly remove /api to connect to the root of the server
     const domain = new URL(apiUrl).host;
     return `${wsProtocol}//${domain}`;
 };
 
 export default function OwnerDashboardPage({ setPage, handleLogout, user }) {
-    // State now holds active sessions with cft, name, and fileName
-    const [activeSessions, setActiveSessions] = useState(() => {
-        const saved = localStorage.getItem(`activeSessions_${user.organization}`);
+    const [liveCounters, setLiveCounters] = useState(() => {
+        // --- FIX: Check if user exists before accessing user.organization ---
+        if (!user) return {};
+        const saved = localStorage.getItem(`liveCounters_${user.organization}`);
         return saved ? JSON.parse(saved) : {};
     });
     const [totalLiveCFT, setTotalLiveCFT] = useState(0);
 
     useEffect(() => {
+        // --- FIX: Add a guard clause to ensure user and user.organization exist ---
+        if (!user || !user.organization) {
+            return; // Do nothing if the user object isn't loaded yet
+        }
+        
         const token = localStorage.getItem('token');
         if (!token) return;
 
         const wsUrl = `${getWebSocketURL()}?token=${token}`;
         const ws = new WebSocket(wsUrl);
 
+        ws.onopen = () => console.log("Owner WebSocket Connected");
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-
             if (data.type === 'CFT_UPDATE') {
-                setActiveSessions(prev => ({
+                setLiveCounters(prev => ({
                     ...prev, 
-                    [data.counterId]: { ...prev[data.counterId], cft: data.cft, name: data.counterName }
+                    [data.counterId]: { cft: data.cft, name: data.counterName, fileName: prev[data.counterId]?.fileName }
                 }));
             } else if (data.type === 'FILENAME_UPDATE') {
-                 setActiveSessions(prev => ({
+                 setLiveCounters(prev => ({
                     ...prev, 
                     [data.counterId]: { ...prev[data.counterId], fileName: data.fileName, name: data.counterName }
                 }));
             } else if (data.type === 'COUNTER_DISCONNECTED') {
-                setActiveSessions(prev => {
-                    const newSessions = { ...prev };
-                    delete newSessions[data.counterId];
-                    return newSessions;
+                setLiveCounters(prev => {
+                    const newCounters = { ...prev };
+                    delete newCounters[data.counterId];
+                    return newCounters;
                 });
             }
         };
-
         ws.onclose = () => console.log('Owner WebSocket disconnected');
         ws.onerror = (error) => console.error('Owner WebSocket error:', error);
 
         return () => ws.close();
-    }, [user.organization]);
+    }, [user]); // Depend on the whole user object
 
     useEffect(() => {
-        // Calculate total CFT and save to local storage whenever sessions change
-        const total = Object.values(activeSessions).reduce((sum, session) => sum + (session.cft || 0), 0);
+        // --- FIX: Add a guard clause for user ---
+        if (!user) return;
+        
+        const total = Object.values(liveCounters).reduce((sum, counter) => sum + (counter.cft || 0), 0);
         setTotalLiveCFT(total);
-        localStorage.setItem(`activeSessions_${user.organization}`, JSON.stringify(activeSessions));
-    }, [activeSessions, user.organization]);
+        localStorage.setItem(`liveCounters_${user.organization}`, JSON.stringify(liveCounters));
+    }, [liveCounters, user]);
+
+    // --- FIX: Add a loading state if user is not yet loaded ---
+    if (!user) {
+        return <div className="p-8 max-w-6xl mx-auto text-center">Loading...</div>;
+    }
 
     return (
         <div className="p-8 max-w-6xl mx-auto">
@@ -73,17 +86,15 @@ export default function OwnerDashboardPage({ setPage, handleLogout, user }) {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Total Live CFT */}
                 <div className="md:col-span-1 p-6 bg-white rounded-lg shadow-lg text-center">
                     <h2 className="text-2xl font-semibold text-gray-700 mb-2">Total Live CFT</h2>
                     <p className="text-5xl font-bold text-blue-600">{totalLiveCFT.toFixed(4)}</p>
                     <p className="text-gray-500 mt-1">Sum of all active counters.</p>
                 </div>
-                {/* Active Sessions */}
                 <div className="md:col-span-2 p-6 bg-white rounded-lg shadow-lg">
                     <h2 className="text-2xl font-semibold text-gray-700 mb-4 border-b pb-2">Active Sessions</h2>
                     <div className="space-y-3 max-h-64 overflow-y-auto">
-                        {Object.keys(activeSessions).length > 0 ? Object.entries(activeSessions).map(([id, data]) => (
+                        {Object.keys(liveCounters).length > 0 ? Object.entries(liveCounters).map(([id, data]) => (
                             <div key={id} className="flex justify-between items-center p-3 bg-gray-50 rounded-md">
                                 <div>
                                     <p className="font-medium text-gray-800">{data.name}</p>
@@ -98,4 +109,3 @@ export default function OwnerDashboardPage({ setPage, handleLogout, user }) {
         </div>
     );
 }
-

@@ -12,8 +12,8 @@ const getWebSocketURL = () => {
 export default function TimberRecorderPage({ user, setPage, handleBack, activeDraft, setActiveDraft, sessionInfo }) {
     // --- Static Data ---
     const thicknessData = [0.75, 1, 1.5, 2, 2.5, 3];
-    const lengthData = [1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75, 8, 8.25, 8.5, 8.75, 9, 9.25, 9.5, 9.75, 10, 10.25, 10.5, 10.75, 11, 11.25, 11.5, 11.75, 12, 12.25, 12.5, 12.75, 13, 13.25, 13.5, 13.75, 14];
-    const widthData = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    const lengthData = [1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25, 6.5, 6.75, 7, 7.25, 7.5, 7.75, 8, 8.25, 8.5, 8.75, 9, 9.25, 9.5, 9.75, 10, 10.25, 10.5, 10.75, 11, 11.25, 11.5, 11.75, 12, 12.25, 12.5, 12.75, 13, 13.25, 13.5, 13.75];
+    const widthData = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
     // --- State Management ---
     const [selectedThickness, setSelectedThickness] = useState(1);
@@ -25,6 +25,7 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
     const [incrementHistory, setIncrementHistory] = useState([]);
     const [entryHistory, setEntryHistory] = useState([]);
     const [reportFileName, setReportFileName] = useState('');
+    const [lastClickedKey, setLastClickedKey] = useState(null); // State for flash effect
     const ws = useRef(null);
 
     // --- WebSocket Connection & Data Loading ---
@@ -95,6 +96,16 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
         }
     }, [recordedData]);
 
+    // --- Flash Effect Logic ---
+    useEffect(() => {
+        if (lastClickedKey) {
+            const timer = setTimeout(() => {
+                setLastClickedKey(null);
+            }, 100); // Flash duration (100ms)
+            return () => clearTimeout(timer);
+        }
+    }, [lastClickedKey]);
+
     // --- Event Handlers ---
     const handleCountChange = (length, width, delta) => {
         let amount = delta;
@@ -109,6 +120,7 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
         }
 
         const key = `${selectedThickness}-${length}-${width}`;
+        setLastClickedKey(key); // Trigger the flash effect
         const newEntry = { thickness: selectedThickness, length, width, quantity: amount, status: isRejectMode ? 'Rejected' : 'Accepted' };
         setEntryHistory(prev => [...prev, newEntry]);
 
@@ -193,7 +205,7 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
         handleReset();
     };
 
-    // --- CORRECTED Report Generation Logic ---
+    // --- Report Generation Logic ---
     const generateAndDownloadXLSX = (accepted, rejected, fileName) => {
         const wb = XLSX.utils.book_new();
 
@@ -304,7 +316,6 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
             XLSX.utils.book_append_sheet(wb, processSheetData(acceptedGrouped[thickness], thickness), `Thickness ${thickness}`);
         }
         
-        // ADDED: Logic to process and add rejected data to the workbook
         if (Object.keys(rejected).length > 0) {
             const rejectedGrouped = {};
             for (const key in rejected) {
@@ -399,8 +410,22 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
                                         {widthData.map(w => {
                                             const key = `${selectedThickness}-${l}-${w}`;
                                             const count = (isRejectMode ? rejectedData[key] : recordedData[key]) || 0;
+                                            
+                                            // Determine cell background class
+                                            let cellBgClass = '';
+                                            if (lastClickedKey === key) {
+                                                cellBgClass = isRejectMode ? 'bg-red-300' : 'bg-blue-300'; // Flash colors
+                                            } else if (isRejectMode && count > 0) {
+                                                cellBgClass = 'bg-red-100'; // Resting reject color
+                                            } else if (!isRejectMode && count > 0) {
+                                                cellBgClass = 'bg-blue-100'; // Resting accept color
+                                            }
+
                                             return (
-                                                <td key={w} className={`px-3 py-2 text-center text-sm text-gray-500 border border-gray-300 ${isRejectMode && count > 0 ? 'bg-red-100' : ''}`}>
+                                                <td 
+                                                    key={w} 
+                                                    className={`px-3 py-2 text-center text-sm text-gray-500 border border-gray-300 ${cellBgClass}`}
+                                                >
                                                     <div className="flex flex-col items-center justify-center">
                                                         <div className="flex items-center space-x-2">
                                                             {isEditMode && (
@@ -445,4 +470,3 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
         </div>
     );
 }
-
