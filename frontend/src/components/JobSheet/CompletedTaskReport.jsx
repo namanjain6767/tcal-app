@@ -1,7 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
+import html2pdf from 'html2pdf.js';
 
 // --- Completed Task Report Component ---
 export default function CompletedTaskReport({ task, onBack }) {
+    const reportRef = useRef();
     
     // This is the core logic to calculate the summary
     const summaryData = useMemo(() => {
@@ -28,7 +30,7 @@ export default function CompletedTaskReport({ task, onBack }) {
             let livePcs = 0;
             let liveCFT = 0;
             const partKeyPrefix = `part_${index}_`;
-            const rawMaterialsUsed = []; // <-- NEW: To store the breakdown
+            const rawMaterialsUsed = [];
 
             for (const key in completedData) {
                 if (key.startsWith(partKeyPrefix)) {
@@ -37,7 +39,6 @@ export default function CompletedTaskReport({ task, onBack }) {
                     livePcs += count;
                     liveCFT += (t * l * w * count) / 144;
 
-                    // --- NEW: Add to the raw materials list ---
                     rawMaterialsUsed.push({
                         key: key,
                         t: t,
@@ -45,7 +46,6 @@ export default function CompletedTaskReport({ task, onBack }) {
                         w: w,
                         qty: count
                     });
-                    // --- END NEW ---
                 }
             }
 
@@ -62,7 +62,7 @@ export default function CompletedTaskReport({ task, onBack }) {
                 targetCFT: targetCFT.toFixed(2),
                 liveCFT: liveCFT.toFixed(2),
                 varianceCFT: (liveCFT - targetCFT).toFixed(2),
-                rawMaterialsUsed: rawMaterialsUsed // <-- NEW
+                rawMaterialsUsed: rawMaterialsUsed
             };
         });
 
@@ -87,109 +87,150 @@ export default function CompletedTaskReport({ task, onBack }) {
         return 'text-gray-700';
     };
 
+    // --- NEW: PDF Download Handler ---
+    const handleDownloadPDF = () => {
+        const element = reportRef.current;
+        const opt = {
+            margin: 10,
+            filename: `JobSheet_Report_${task.product_name}_${new Date().toISOString().split('T')[0]}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+        };
+        html2pdf().set(opt).from(element).save();
+    };
+
     return (
         <div className="p-4 bg-white rounded-lg shadow-xl">
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Completed Task Summary</h2>
-            <p className="text-lg text-gray-600 mb-4 border-b pb-4">{task.product_name} (Qty: {task.quantity})</p>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div className="p-4 bg-gray-50 rounded-lg">
-                    <h3 className="text-sm font-medium text-gray-500 uppercase">Assigned To</h3>
-                    <p className="text-xl font-semibold text-gray-900">{task.assigned_to_name}</p>
+            {/* The section inside this div will be printed to PDF */}
+            <div ref={reportRef} className="p-4">
+                <h2 className="text-2xl font-bold text-gray-800 mb-2">Completed Task Summary</h2>
+                <p className="text-lg text-gray-600 mb-4 border-b pb-4">{task.product_name} (Qty: {task.quantity})</p>
+                
+                {/* Basic Info Row */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                        <h3 className="text-sm font-medium text-gray-500 uppercase">Assigned To</h3>
+                        <p className="text-xl font-semibold text-gray-900">{task.assigned_to_name}</p>
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                        <h3 className="text-sm font-medium text-gray-500 uppercase">Completed On</h3>
+                        <p className="text-xl font-semibold text-gray-900">{new Date(task.completed_at).toLocaleString()}</p>
+                    </div>
                 </div>
-                <div className="p-4 bg-gray-50 rounded-lg">
-                    <h3 className="text-sm font-medium text-gray-500 uppercase">Completed On</h3>
-                    <p className="text-xl font-semibold text-gray-900">{new Date(task.completed_at).toLocaleString()}</p>
-                </div>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 text-center">
-                <div className="p-4 bg-gray-50 rounded-lg">
-                    <h3 className="text-sm font-medium text-gray-500 uppercase">Total Target CFT</h3>
-                    <p className="text-2xl font-bold text-gray-900">{summaryData.grandTotalTargetCFT}</p>
+                {/* Job Details Row */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div className="p-4 bg-blue-50 rounded-lg">
+                        <h3 className="text-sm font-medium text-blue-600 uppercase">Contractor</h3>
+                        <p className="text-lg font-semibold text-gray-900">{task.contractor_name || 'N/A'}</p>
+                    </div>
+                    <div className="p-4 bg-blue-50 rounded-lg">
+                        <h3 className="text-sm font-medium text-blue-600 uppercase">Buyer</h3>
+                        <p className="text-lg font-semibold text-gray-900">{task.buyer_name || 'N/A'}</p>
+                    </div>
+                    <div className="p-4 bg-blue-50 rounded-lg">
+                        <h3 className="text-sm font-medium text-blue-600 uppercase">Reference #</h3>
+                        <p className="text-lg font-semibold text-gray-900">{task.job_sheet_ref || 'N/A'}</p>
+                    </div>
                 </div>
-                <div className="p-4 bg-gray-50 rounded-lg">
-                    <h3 className="text-sm font-medium text-gray-500 uppercase">Total Used CFT</h3>
-                    <p className="text-2xl font-bold text-gray-900">{summaryData.grandTotalLiveCFT}</p>
 
+                {/* Stats Row */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 text-center">
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                        <h3 className="text-sm font-medium text-gray-500 uppercase">Total Target CFT</h3>
+                        <p className="text-2xl font-bold text-gray-900">{summaryData.grandTotalTargetCFT}</p>
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                        <h3 className="text-sm font-medium text-gray-500 uppercase">Total Used CFT</h3>
+                        <p className="text-2xl font-bold text-gray-900">{summaryData.grandTotalLiveCFT}</p>
+
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                        <h3 className="text-sm font-medium text-gray-500 uppercase">Total Variance</h3>
+                        <p className={`text-2xl font-bold ${getVarianceColor(summaryData.grandTotalVarianceCFT)}`}>
+                            {summaryData.grandTotalVarianceCFT > 0 ? '+' : ''}{summaryData.grandTotalVarianceCFT}
+                        </p>
+                    </div>
                 </div>
-                <div className="p-4 bg-gray-50 rounded-lg">
-                    <h3 className="text-sm font-medium text-gray-500 uppercase">Total Variance</h3>
-                    <p className={`text-2xl font-bold ${getVarianceColor(summaryData.grandTotalVarianceCFT)}`}>
-                        {summaryData.grandTotalVarianceCFT > 0 ? '+' : ''}{summaryData.grandTotalVarianceCFT}
-                    </p>
-                </div>
-            </div>
 
-            <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Part Name</th>
-                            <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Target Pcs</th>
-                            <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Live Pcs</th>
-                            <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Variance</th>
-                            <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Target CFT</th>
-                            <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Live CFT</th>
-                            <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Variance</th>
-                        </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {summaryData.partsSummary.map((part, index) => (
-                            <React.Fragment key={index}>
-                                {/* Main Part Row */}
-                                <tr className="bg-white">
-                                    <td className="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{part.part_name}</td>
-                                    <td className="px-3 py-3 text-right text-sm text-gray-700">{part.targetPcs}</td>
-                                    <td className="px-3 py-3 text-right text-sm text-gray-700">{part.livePcs}</td>
-                                    <td className={`px-3 py-3 text-right text-sm ${getVarianceColor(part.variancePcs)}`}>
-                                        {part.variancePcs > 0 ? '+' : ''}{part.variancePcs}
-                                    </td>
-                                    <td className="px-3 py-3 text-right text-sm text-gray-700">{part.targetCFT}</td>
-                                    <td className="px-3 py-3 text-right text-sm text-gray-700">{part.liveCFT}</td>
-                                    <td className={`px-3 py-3 text-right text-sm ${getVarianceColor(part.varianceCFT)}`}>
-                                        {part.varianceCFT > 0 ? '+' : ''}{part.varianceCFT}
-                                    </td>
-                                </tr>
-
-                                {/* NEW: Raw Materials Breakdown Row */}
-                                {part.rawMaterialsUsed.length > 0 && (
-                                    <tr className="bg-gray-50">
-                                        <td colSpan="7" className="px-3 py-2">
-                                            <div className="pl-8">
-                                                <h4 className="text-xs font-semibold text-gray-600">Raw Materials Used:</h4>
-                                                <table className="min-w-full divide-y divide-gray-200 mt-1">
-                                                    <thead className="bg-gray-100">
-                                                        <tr>
-                                                            <th className="px-2 py-1 text-left text-xs font-medium text-gray-500">Thickness</th>
-                                                            <th className="px-2 py-1 text-left text-xs font-medium text-gray-500">Length</th>
-                                                            <th className="px-2 py-1 text-left text-xs font-medium text-gray-500">Width</th>
-                                                            <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Qty</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="bg-white divide-y divide-gray-200">
-                                                        {part.rawMaterialsUsed.map(raw => (
-                                                            <tr key={raw.key}>
-                                                                <td className="px-2 py-1 text-sm">{raw.t}</td>
-                                                                <td className="px-2 py-1 text-sm">{raw.l}</td>
-                                                                <td className="px-2 py-1 text-sm">{raw.w}</td>
-                                                                <td className="px-2 py-1 text-right text-sm">{raw.qty}</td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                {/* Detailed Breakdown Table */}
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Part Name</th>
+                                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Target Pcs</th>
+                                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Live Pcs</th>
+                                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Variance</th>
+                                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Target CFT</th>
+                                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Live CFT</th>
+                                <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Variance</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {summaryData.partsSummary.map((part, index) => (
+                                <React.Fragment key={index}>
+                                    {/* Main Part Row */}
+                                    <tr className="bg-white">
+                                        <td className="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{part.part_name}</td>
+                                        <td className="px-3 py-3 text-right text-sm text-gray-700">{part.targetPcs}</td>
+                                        <td className="px-3 py-3 text-right text-sm text-gray-700">{part.livePcs}</td>
+                                        <td className={`px-3 py-3 text-right text-sm ${getVarianceColor(part.variancePcs)}`}>
+                                            {part.variancePcs > 0 ? '+' : ''}{part.variancePcs}
+                                        </td>
+                                        <td className="px-3 py-3 text-right text-sm text-gray-700">{part.targetCFT}</td>
+                                        <td className="px-3 py-3 text-right text-sm text-gray-700">{part.liveCFT}</td>
+                                        <td className={`px-3 py-3 text-right text-sm ${getVarianceColor(part.varianceCFT)}`}>
+                                            {part.varianceCFT > 0 ? '+' : ''}{part.varianceCFT}
                                         </td>
                                     </tr>
-                                )}
-                            </React.Fragment>
-                        ))}
-                    </tbody>
-                </table>
+
+                                    {/* Raw Materials Breakdown Row */}
+                                    {part.rawMaterialsUsed.length > 0 && (
+                                        <tr className="bg-gray-50">
+                                            <td colSpan="7" className="px-3 py-2">
+                                                <div className="pl-8">
+                                                    <h4 className="text-xs font-semibold text-gray-600">Raw Materials Used:</h4>
+                                                    <table className="min-w-full divide-y divide-gray-200 mt-1">
+                                                        <thead className="bg-gray-100">
+                                                            <tr>
+                                                                <th className="px-2 py-1 text-left text-xs font-medium text-gray-500">Thickness</th>
+                                                                <th className="px-2 py-1 text-left text-xs font-medium text-gray-500">Length</th>
+                                                                <th className="px-2 py-1 text-left text-xs font-medium text-gray-500">Width</th>
+                                                                <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Qty</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="bg-white divide-y divide-gray-200">
+                                                            {part.rawMaterialsUsed.map(raw => (
+                                                                <tr key={raw.key}>
+                                                                    <td className="px-2 py-1 text-sm">{raw.t}</td>
+                                                                    <td className="px-2 py-1 text-sm">{raw.l}</td>
+                                                                    <td className="px-2 py-1 text-sm">{raw.w}</td>
+                                                                    <td className="px-2 py-1 text-right text-sm">{raw.qty}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <div className="flex justify-end mt-8">
+
+            <div className="flex justify-end gap-4 mt-8">
                 <button onClick={onBack} className="py-2 px-6 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Back</button>
+                {/* --- NEW: Download Button --- */}
+                <button onClick={handleDownloadPDF} className="py-2 px-6 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center">
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    Download PDF
+                </button>
             </div>
         </div>
     );
-};
+}

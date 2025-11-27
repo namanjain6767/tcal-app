@@ -1,11 +1,12 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import api from '../../api';
+import html2pdf from 'html2pdf.js';
 
 // --- Job Sheet Counter Component ---
 export default function JobSheetCounter({ product, task, onBack }) {
     const [currentPartIndex, setCurrentPartIndex] = useState(0);
     
-    // --- MODIFIED: Load data from local storage on init ---
+    // --- Load data from local storage on init ---
     const [recordedData, setRecordedData] = useState(() => {
         const savedData = localStorage.getItem(`jobSheetData_${task.id}`);
         return savedData ? JSON.parse(savedData) : {};
@@ -17,20 +18,20 @@ export default function JobSheetCounter({ product, task, onBack }) {
     const widthData = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     const currentPart = product.parts[currentPartIndex];
     
-    // --- Calculations for the current part ---
+    // --- Live Calculations for the UI ---
     const { liveCFT, livePcs, targetCFT, targetPcs } = useMemo(() => {
         const partQty = parseFloat(currentPart.qty) || 0;
         const targetPcs = partQty * task.quantity;
         
         let calculatedTargetCFT = 0;
-        if (currentPart.cft !== undefined && currentPart.cft !== null) {
-            calculatedTargetCFT = (parseFloat(currentPart.cft) || 0);
+        if (currentPart.cft !== undefined && currentPart.cft !== null && parseFloat(currentPart.cft) > 0) {
+            calculatedTargetCFT = parseFloat(currentPart.cft);
         } else {
             const { cft_l, cft_w, cft_t } = currentPart;
             calculatedTargetCFT = ( (parseFloat(cft_l) || 0) * (parseFloat(cft_w) || 0) * (parseFloat(cft_t) || 0) ) / 144;
         }
         
-        const targetCFT = calculatedTargetCFT * partQty * task.quantity;
+        const totalTargetCFT = calculatedTargetCFT * task.quantity;
         
         let livePcs = 0;
         let liveCFT = 0;
@@ -44,7 +45,7 @@ export default function JobSheetCounter({ product, task, onBack }) {
                 liveCFT += (t * l * w * count) / 144;
             }
         }
-        return { liveCFT, livePcs, targetCFT, targetPcs };
+        return { liveCFT, livePcs, targetCFT: totalTargetCFT, targetPcs };
     }, [recordedData, currentPart, currentPartIndex, task.quantity]);
 
     // --- Flash Effect Logic ---
@@ -67,7 +68,6 @@ export default function JobSheetCounter({ product, task, onBack }) {
         setRecordedData(newData);
         setIncrementHistory(prev => [...prev, key]);
         
-        // --- MODIFIED: Save to local storage ---
         localStorage.setItem(`jobSheetData_${task.id}`, JSON.stringify(newData));
     };
 
@@ -80,7 +80,6 @@ export default function JobSheetCounter({ product, task, onBack }) {
             if (newData[lastKey] === 0) delete newData[lastKey];
             setRecordedData(newData);
             
-            // --- MODIFIED: Save to local storage ---
             localStorage.setItem(`jobSheetData_${task.id}`, JSON.stringify(newData));
         }
         setIncrementHistory([...incrementHistory]);
@@ -98,20 +97,205 @@ export default function JobSheetCounter({ product, task, onBack }) {
         }
     };
     
+    // --- UPDATED: Finish Job Handler (Generates Detailed PDF for Email) ---
     const handleFinishJob = async () => {
-        if (window.confirm("Are you sure you want to mark this job as complete?")) {
+        if (window.confirm("Are you sure you want to mark this job as complete and email the report?")) {
             try {
-                // Send the final recordedData to the backend
-                await api.put(`/tasks/${task.id}/complete`, recordedData);
-                alert("Job marked as complete!");
+                // 1. Calculate ALL Summary Data
+                let grandTotalTargetPcs = 0;
+                let grandTotalTargetCFT = 0;
+                let grandTotalLivePcs = 0;
+                let grandTotalLiveCFT = 0;
                 
-                // --- MODIFIED: Clear local storage on success ---
+                // Prepare data for rows
+                const partsData = product.parts.map((part, idx) => {
+                    const partQty = parseFloat(part.qty) || 0;
+                    const tPcs = partQty * task.quantity;
+                    
+                    let tCFT = 0;
+                    if (part.cft && parseFloat(part.cft) > 0) {
+                         tCFT = parseFloat(part.cft) * task.quantity;
+                    } else {
+                         tCFT = ((partQty * (parseFloat(part.cft_l)||0) * (parseFloat(part.cft_w)||0) * (parseFloat(part.cft_t)||0)) / 144) * task.quantity;
+                    }
+
+                    let lPcs = 0, lCFT = 0;
+                    const rawMaterials = [];
+                    const prefix = `part_${idx}_`;
+                    
+                    for(const k in recordedData) {
+                         if(k.startsWith(prefix)) {
+                             const [_, __, t, l, w] = k.split('_').map(Number);
+                             const c = recordedData[k];
+                             lPcs += c;
+                             lCFT += (t * l * w * c) / 144;
+                             rawMaterials.push({ t, l, w, qty: c });
+                         }
+                    }
+
+                    grandTotalTargetPcs += tPcs;
+                    grandTotalTargetCFT += tCFT;
+                    grandTotalLivePcs += lPcs;
+                    grandTotalLiveCFT += lCFT;
+
+                    return {
+                        name: part.part_name,
+                        tPcs, lPcs, varPcs: lPcs - tPcs,
+                        tCFT, lCFT, varCFT: lCFT - tCFT,
+                        rawMaterials
+                    };
+                });
+
+                const grandVarCFT = grandTotalLiveCFT - grandTotalTargetCFT;
+                const getVarColor = (val) => val > 0 ? '#dc2626' : (val < 0 ? '#d97706' : '#374151'); // red, yellow, gray
+
+                // 2. Construct Detailed HTML (Matching CompletedTaskReport.jsx)
+                let tableRowsHtml = partsData.map(p => {
+                    const rawRows = p.rawMaterials.map(r => `
+                        <tr style="background-color: #f9fafb; font-size: 11px; color: #666;">
+                            <td style="padding: 4px 8px; border: 1px solid #eee; text-align: center;">${r.t}</td>
+                            <td style="padding: 4px 8px; border: 1px solid #eee; text-align: center;">${r.l}</td>
+                            <td style="padding: 4px 8px; border: 1px solid #eee; text-align: center;">${r.w}</td>
+                            <td style="padding: 4px 8px; border: 1px solid #eee; text-align: center;">${r.qty}</td>
+                        </tr>
+                    `).join('');
+
+                    const rawTable = p.rawMaterials.length > 0 ? `
+                        <tr style="background-color: #f9fafb;">
+                            <td colspan="7" style="padding: 5px 10px; border: 1px solid #e5e7eb;">
+                                <div style="margin-left: 15px;">
+                                    <div style="font-size: 11px; font-weight: bold; margin-bottom: 2px;">Raw Materials Used:</div>
+                                    <table style="width: 50%; border-collapse: collapse;">
+                                        <thead>
+                                            <tr style="background-color: #eee;">
+                                                <th style="padding: 2px; font-size: 10px; text-align: center;">Thickness</th>
+                                                <th style="padding: 2px; font-size: 10px; text-align: center;">Length</th>
+                                                <th style="padding: 2px; font-size: 10px; text-align: center;">Width</th>
+                                                <th style="padding: 2px; font-size: 10px; text-align: center;">Qty</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>${rawRows}</tbody>
+                                    </table>
+                                </div>
+                            </td>
+                        </tr>
+                    ` : '';
+
+                    return `
+                        <tr style="background-color: #fff; border-bottom: 1px solid #e5e7eb;">
+                            <td style="padding: 8px; font-weight: bold; border: 1px solid #e5e7eb;">${p.name}</td>
+                            <td style="padding: 8px; text-align: right; border: 1px solid #e5e7eb;">${p.tPcs}</td>
+                            <td style="padding: 8px; text-align: right; border: 1px solid #e5e7eb;">${p.lPcs}</td>
+                            <td style="padding: 8px; text-align: right; border: 1px solid #e5e7eb; color: ${getVarColor(p.varPcs)}; font-weight: bold;">${p.varPcs > 0 ? '+' : ''}${p.varPcs}</td>
+                            <td style="padding: 8px; text-align: right; border: 1px solid #e5e7eb;">${p.tCFT.toFixed(2)}</td>
+                            <td style="padding: 8px; text-align: right; border: 1px solid #e5e7eb;">${p.lCFT.toFixed(2)}</td>
+                            <td style="padding: 8px; text-align: right; border: 1px solid #e5e7eb; color: ${getVarColor(p.varCFT)}; font-weight: bold;">${p.varCFT > 0 ? '+' : ''}${p.varCFT.toFixed(2)}</td>
+                        </tr>
+                        ${rawTable}
+                    `;
+                }).join('');
+
+                // --- UPDATED REPORT HTML TO MATCH DOWNLOADED VERSION ---
+                const reportHtml = `
+                    <div style="padding: 20px; font-family: sans-serif; color: #333; max-width: 1000px; margin: 0 auto;">
+                        <h2 style="text-align: center; color: #1f2937; margin-bottom: 5px;">Completed Task Summary</h2>
+                        <h3 style="text-align: center; color: #6b7280; font-weight: normal; margin-top: 0; margin-bottom: 20px;">
+                            ${product.product_name} <span style="font-size: 0.8em;">(Qty: ${task.quantity})</span>
+                        </h3>
+                        
+                        <!-- Info Grid (Matching CompletedTaskReport) -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                            <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px;">
+                                <div style="font-size: 11px; text-transform: uppercase; color: #6b7280; margin-bottom: 5px;">Job Details</div>
+                                <div style="margin-bottom: 3px;"><strong>Ref #:</strong> ${task.job_sheet_ref || 'N/A'}</div>
+                                <div style="margin-bottom: 3px;"><strong>Contractor:</strong> ${task.contractor_name || 'N/A'}</div>
+                                <div><strong>Buyer:</strong> ${task.buyer_name || 'N/A'}</div>
+                            </div>
+                            <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; text-align: right;">
+                                <div style="font-size: 11px; text-transform: uppercase; color: #6b7280; margin-bottom: 5px;">Completion</div>
+                                <div style="margin-bottom: 3px;"><strong>Assigned To:</strong> ${task.assigned_to_name || 'Counter'}</div>
+                                <div><strong>Date:</strong> ${new Date().toLocaleString()}</div>
+                            </div>
+                        </div>
+
+                        <!-- Stats Grid (Matching CompletedTaskReport) -->
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 25px; text-align: center; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+                            <div style="flex: 1; padding: 15px; background-color: #f9fafb; border-right: 1px solid #e5e7eb;">
+                                <div style="font-size: 11px; text-transform: uppercase; color: #6b7280;">Total Target CFT</div>
+                                <div style="font-size: 20px; font-weight: bold; color: #111827;">${grandTotalTargetCFT.toFixed(2)}</div>
+                            </div>
+                            <div style="flex: 1; padding: 15px; background-color: #f9fafb; border-right: 1px solid #e5e7eb;">
+                                <div style="font-size: 11px; text-transform: uppercase; color: #6b7280;">Total Used CFT</div>
+                                <div style="font-size: 20px; font-weight: bold; color: #111827;">${grandTotalLiveCFT.toFixed(2)}</div>
+                            </div>
+                            <div style="flex: 1; padding: 15px; background-color: #f9fafb;">
+                                <div style="font-size: 11px; text-transform: uppercase; color: #6b7280;">Total Variance</div>
+                                <div style="font-size: 20px; font-weight: bold; color: ${getVarColor(grandVarCFT)};">
+                                    ${grandVarCFT > 0 ? '+' : ''}${grandVarCFT.toFixed(2)}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Main Table -->
+                        <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid #e5e7eb;">
+                            <thead style="background-color: #e5e7eb;">
+                                <tr>
+                                    <th style="padding: 10px; text-align: left; border: 1px solid #d1d5db;">Part Name</th>
+                                    <th style="padding: 10px; text-align: right; border: 1px solid #d1d5db;">Target Pcs</th>
+                                    <th style="padding: 10px; text-align: right; border: 1px solid #d1d5db;">Live Pcs</th>
+                                    <th style="padding: 10px; text-align: right; border: 1px solid #d1d5db;">Var Pcs</th>
+                                    <th style="padding: 10px; text-align: right; border: 1px solid #d1d5db;">Target CFT</th>
+                                    <th style="padding: 10px; text-align: right; border: 1px solid #d1d5db;">Live CFT</th>
+                                    <th style="padding: 10px; text-align: right; border: 1px solid #d1d5db;">Var CFT</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${tableRowsHtml}
+                            </tbody>
+                        </table>
+                        
+                        <div style="margin-top: 30px; text-align: center; font-size: 11px; color: #9ca3af;">
+                            Generated by T-CAL System
+                        </div>
+                    </div>
+                `;
+                
+                const element = document.createElement('div');
+                element.innerHTML = reportHtml;
+                document.body.appendChild(element); // Temporarily add to DOM for better rendering
+                element.style.width = '1000px'; // Enforce width for desktop-like PDF
+
+                // 3. Generate PDF Blob
+                const opt = {
+                    margin: 10,
+                    filename: `JobSheet_Report_${task.product_name}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+                };
+
+                const blob = await html2pdf().set(opt).from(element).output('blob');
+                document.body.removeChild(element); // Clean up
+
+                // 4. Create FormData
+                const formData = new FormData();
+                formData.append('recordedData', JSON.stringify(recordedData));
+                formData.append('pdf', blob, `JobSheet_Report_${task.product_name}.pdf`);
+
+                // 5. Send to Backend
+                await api.put(`/tasks/${task.id}/complete`, formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
+
+                alert("Job marked as complete and detailed report emailed!");
+                
+                // Clear local storage
                 localStorage.removeItem(`jobSheetData_${task.id}`);
                 
-                onBack(); // Go back to the task list
+                onBack(); 
             } catch (error) {
                 console.error("Failed to complete task:", error);
-                alert("Failed to complete task.");
+                alert("Failed to complete task (Email might have failed, check server logs).");
             }
         }
     };

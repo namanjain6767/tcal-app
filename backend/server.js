@@ -7,14 +7,17 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const url = require('url');
+const multer = require('multer'); // Handling file uploads (PDFs)
+const nodemailer = require('nodemailer'); // Sending emails
 
 const app = express();
 const server = http.createServer(app);
 
 // --- CORS Configuration ---
 const allowedOrigins = [
-    'https://draveta.vercel.app', 
-    'http://localhost:5173'  
+    'http://localhost:5173',
+    'https://astounding-liger-a7f504.netlify.app', // Your Netlify URL
+    'https://draveta.vercel.app' // Your Vercel URL
 ];
 app.use(cors({
     origin: function (origin, callback) {
@@ -33,9 +36,23 @@ const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
 });
 
+// --- Configure Multer (Memory Storage for PDF attachment) ---
+const upload = multer({ storage: multer.memoryStorage() });
+
+// --- Configure Nodemailer ---
+// Replace with your actual email service credentials in .env
+const transporter = nodemailer.createTransport({
+    service: 'gmail', 
+    auth: {
+        user: process.env.EMAIL_USER, 
+        pass: process.env.EMAIL_PASS
+    }
+});
+
 // --- Create Tables ---
 (async () => {
     try {
+        // 1. Users
         await pool.query(`
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -51,6 +68,7 @@ const pool = new Pool({
                 organization VARCHAR(255)
             );
         `);
+        // 2. Reports
         await pool.query(`
             CREATE TABLE IF NOT EXISTS reports (
                 id SERIAL PRIMARY KEY,
@@ -60,6 +78,7 @@ const pool = new Pool({
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        // 3. Logs
         await pool.query(`
             CREATE TABLE IF NOT EXISTS logs (
                 id SERIAL PRIMARY KEY,
@@ -69,6 +88,7 @@ const pool = new Pool({
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        // 4. Drafts
         await pool.query(`
             CREATE TABLE IF NOT EXISTS drafts (
                 id SERIAL PRIMARY KEY,
@@ -78,7 +98,7 @@ const pool = new Pool({
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        // --- NEW TABLE FOR JOB SHEETS ---
+        // 5. Products (T-Job Sheet)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS products (
                 id SERIAL PRIMARY KEY,
@@ -91,8 +111,7 @@ const pool = new Pool({
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        
-        // --- UPDATED TASKS TABLE ---
+        // 6. Tasks (T-Job Sheet)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS tasks (
                 id SERIAL PRIMARY KEY,
@@ -105,6 +124,9 @@ const pool = new Pool({
                 status VARCHAR(50) DEFAULT 'pending',
                 assign_date DATE,
                 expiry_date DATE,
+                contractor_name VARCHAR(255),
+                buyer_name VARCHAR(255),
+                job_sheet_ref VARCHAR(255),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 completed_at TIMESTAMP,
                 completed_data JSONB
@@ -134,7 +156,7 @@ wss.on('connection', async (ws, req) => {
         ws.on('message', async (message) => {
             const data = JSON.parse(message);
             
-            // Find all owners of the same organization to broadcast to them
+            // Find owners of the same organization to broadcast
             try {
                 const result = await pool.query('SELECT id FROM users WHERE organization = $1 AND role = $2', [decoded.organization, 'owner']);
                 const owners = result.rows;
@@ -142,7 +164,6 @@ wss.on('connection', async (ws, req) => {
                 owners.forEach(owner => {
                     const ownerSocket = clients.get(owner.id);
                     if (ownerSocket && ownerSocket.readyState === WebSocket.OPEN) {
-                        // Forward the original message (could be CFT_UPDATE or FILENAME_UPDATE)
                         ownerSocket.send(JSON.stringify({ 
                             ...data,
                             counterId: userId, 
@@ -157,7 +178,7 @@ wss.on('connection', async (ws, req) => {
 
         ws.on('close', () => {
             clients.delete(userId);
-             // Notify owners that a counter has disconnected
+            // Notify owners of disconnect
             try {
                 pool.query('SELECT id FROM users WHERE organization = $1 AND role = $2', [decoded.organization, 'owner'])
                     .then(result => {
@@ -169,7 +190,7 @@ wss.on('connection', async (ws, req) => {
                         });
                     });
             } catch (dbError) {
-                console.error("Error notifying owners of disconnect:", dbError);
+                console.error("Error notifying owners:", dbError);
             }
         });
     } catch (err) {
@@ -190,7 +211,12 @@ const authenticate = (req, res, next) => {
     }
 };
 
-// --- API Endpoints ---
+// ==========================================
+//             API ENDPOINTS
+// ==========================================
+
+// --- AUTH & USER MANAGEMENT ---
+
 app.post('/api/register', authenticate, async (req, res) => {
     if (!req.user.isAdmin) {
         return res.status(403).send({ error: 'Forbidden: Only admins can register new users.' });
@@ -255,7 +281,6 @@ app.get('/api/users', authenticate, async (req, res) => {
     }
 });
 
-// --- GET COUNTERS (for Owners) ---
 app.get('/api/users/counters', authenticate, async (req, res) => {
     const { organization, role } = req.user;
     if (role !== 'owner') {
@@ -295,6 +320,7 @@ app.post('/api/users/:id/lock-ip', authenticate, async (req, res) => {
     }
 });
 
+// --- REPORTS & LOGS ---
 app.get('/api/reports', authenticate, async (req, res) => {
     const { id, role, organization } = req.user;
     try {
@@ -373,12 +399,10 @@ app.delete('/api/reports/:id', authenticate, async (req, res) => {
                 [reportId, userId]
             );
         }
-
         if (result.rowCount === 0) {
             return res.status(404).send({ error: 'Report not found or permission denied.' });
         }
         res.status(200).send({ message: 'Report deleted successfully' });
-
     } catch (error) {
         console.error("Delete Report Error:", error);
         res.status(500).send({ error: 'Failed to delete report.' });
@@ -427,7 +451,7 @@ app.delete('/api/logs/:id', authenticate, async (req, res) => {
     }
 });
 
-// --- PRODUCT API ENDPOINTS ---
+// --- T-JOB SHEET: PRODUCT ENDPOINTS ---
 app.get('/api/products', authenticate, async (req, res) => {
     const { organization } = req.user;
     try {
@@ -530,18 +554,16 @@ app.delete('/api/products/:id', authenticate, async (req, res) => {
 });
 
 
-// --- TASK API ENDPOINTS ---
+// --- T-JOB SHEET: TASK ENDPOINTS ---
 app.get('/api/tasks', authenticate, async (req, res) => {
     const { organization, id: userId, role } = req.user;
     let query;
     let params;
 
     if (role === 'owner') {
-        // Owners see all tasks for their org
         query = "SELECT t.*, p.parts, u.name as assigned_to_name FROM tasks t JOIN products p ON t.product_id = p.id LEFT JOIN users u ON t.assigned_to_user_id = u.id WHERE t.organization = $1 ORDER BY t.created_at DESC";
         params = [organization];
     } else {
-        // Counters only see tasks assigned to them
         query = "SELECT t.*, p.parts FROM tasks t JOIN products p ON t.product_id = p.id WHERE t.organization = $1 AND t.assigned_to_user_id = $2 ORDER BY t.status, t.created_at DESC";
         params = [organization, userId];
     }
@@ -555,21 +577,51 @@ app.get('/api/tasks', authenticate, async (req, res) => {
     }
 });
 
+app.get('/api/tasks/contractors', authenticate, async (req, res) => {
+    const { organization } = req.user;
+    try {
+        const result = await pool.query(
+            'SELECT DISTINCT contractor_name FROM tasks WHERE organization = $1 AND contractor_name IS NOT NULL',
+            [organization]
+        );
+        const names = result.rows.map(r => r.contractor_name).filter(Boolean);
+        res.status(200).json(names);
+    } catch (error) {
+        console.error("Fetch Contractors Error:", error);
+        res.status(500).send({ error: 'Failed to fetch contractors.' });
+    }
+});
+
+app.get('/api/tasks/buyers', authenticate, async (req, res) => {
+    const { organization } = req.user;
+    try {
+        const result = await pool.query(
+            'SELECT DISTINCT buyer_name FROM tasks WHERE organization = $1 AND buyer_name IS NOT NULL',
+            [organization]
+        );
+        const names = result.rows.map(r => r.buyer_name).filter(Boolean);
+        res.status(200).json(names);
+    } catch (error) {
+        console.error("Fetch Buyers Error:", error);
+        res.status(500).send({ error: 'Failed to fetch buyers.' });
+    }
+});
+
 app.post('/api/tasks', authenticate, async (req, res) => {
     const { id: userId, organization, role } = req.user;
-    const { productId, productName, quantity, assignedToUserId, assignDate, expiryDate } = req.body;
+    const { productId, productName, quantity, assignedToUserId, assignDate, expiryDate, contractorName, buyerName, jobSheetRef } = req.body;
 
     if (role !== 'owner') {
         return res.status(403).send({ error: 'Only owners can assign tasks.' });
     }
     if (!productId || !quantity || quantity <= 0 || !assignedToUserId || !assignDate || !expiryDate) {
-        return res.status(400).send({ error: 'All fields are required.' });
+        return res.status(400).send({ error: 'Required fields are missing.' });
     }
 
     try {
         const result = await pool.query(
-            'INSERT INTO tasks (product_id, product_name, assigned_by_user_id, assigned_to_user_id, organization, quantity, status, assign_date, expiry_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
-            [productId, productName, userId, assignedToUserId, organization, quantity, 'pending', assignDate, expiryDate]
+            'INSERT INTO tasks (product_id, product_name, assigned_by_user_id, assigned_to_user_id, organization, quantity, status, assign_date, expiry_date, contractor_name, buyer_name, job_sheet_ref) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *',
+            [productId, productName, userId, assignedToUserId, organization, quantity, 'pending', assignDate, expiryDate, contractorName, buyerName, jobSheetRef]
         );
         res.status(201).json(result.rows[0]);
     } catch (error) {
@@ -578,24 +630,86 @@ app.post('/api/tasks', authenticate, async (req, res) => {
     }
 });
 
-app.put('/api/tasks/:id/complete', authenticate, async (req, res) => {
+// --- COMPLETE TASK (with Email & PDF) ---
+app.put('/api/tasks/:id/complete', authenticate, upload.single('pdf'), async (req, res) => {
     const { id: userId, role } = req.user;
     const { id } = req.params;
-    const recordedData = req.body; // Get the counter's data from the request body
+    
+    let recordedData;
+    try {
+        // If sent as JSON body (no file)
+        if (req.body.recordedData && typeof req.body.recordedData === 'object') {
+            recordedData = req.body.recordedData;
+        } 
+        // If sent as FormData string (with file)
+        else if (req.body.recordedData) {
+            recordedData = JSON.parse(req.body.recordedData);
+        }
+    } catch (e) {
+        return res.status(400).send({ error: 'Invalid recorded data format.' });
+    }
 
     if (role !== 'counter') {
         return res.status(403).send({ error: 'Only counters can complete tasks.' });
     }
 
     try {
+        // 1. Update Database
         const result = await pool.query(
             "UPDATE tasks SET status = 'completed', completed_at = CURRENT_TIMESTAMP, completed_data = $1 WHERE id = $2 AND assigned_to_user_id = $3 RETURNING *",
-            [JSON.stringify(recordedData), id, userId] // Save the recordedData
+            [JSON.stringify(recordedData), id, userId]
         );
+
         if (result.rowCount === 0) {
             return res.status(404).send({ error: 'Task not found or you are not authorized.' });
         }
-        res.status(200).json(result.rows[0]);
+        
+        const task = result.rows[0];
+
+        // 2. Find the Owner's Email
+        const ownerResult = await pool.query('SELECT email, name FROM users WHERE id = $1', [task.assigned_by_user_id]);
+        const owner = ownerResult.rows[0];
+
+        // 3. Send Email with PDF attachment
+        if (owner && req.file) {
+            const mailOptions = {
+                from: process.env.EMAIL_USER || 'noreply@tcal.com',
+                to: owner.email,
+                subject: `Job Completed: ${task.product_name} (Ref: ${task.job_sheet_ref || 'N/A'})`,
+                text: `
+Hello ${owner.name},
+
+A task has been marked as complete by the counter.
+
+Product: ${task.product_name}
+Quantity: ${task.quantity}
+Contractor: ${task.contractor_name || 'N/A'}
+Completed On: ${new Date().toLocaleString()}
+
+Please find the detailed PDF report attached.
+
+Best regards,
+T-CAL System
+                `,
+                attachments: [
+                    {
+                        filename: `JobReport_${task.product_name}.pdf`,
+                        content: req.file.buffer, // PDF file buffer
+                        contentType: 'application/pdf'
+                    }
+                ]
+            };
+
+            transporter.sendMail(mailOptions, (error, info) => {
+                if (error) {
+                    console.error('Error sending email:', error);
+                } else {
+                    console.log('Email sent: ' + info.response);
+                }
+            });
+        }
+
+        res.status(200).json(task);
     } catch (error) {
         console.error("Complete Task Error:", error);
         res.status(500).send({ error: 'Failed to complete task.' });
