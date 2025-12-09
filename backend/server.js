@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const url = require('url');
 const multer = require('multer'); // Handling file uploads (PDFs)
-const nodemailer = require('nodemailer'); // Sending emails
+const sgMail = require('@sendgrid/mail'); // NEW: Import SendGrid
 
 const app = express();
 const server = http.createServer(app);
@@ -36,23 +36,17 @@ const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
 });
 
-// --- Configure Multer (Memory Storage for PDF attachment) ---
+// --- Configure Multer (Memory Storage for PDF) ---
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- Configure Nodemailer ---
-// Replace with your actual email service credentials in .env
-const transporter = nodemailer.createTransport({
-    service: 'gmail', 
-    auth: {
-        user: process.env.EMAIL_USER, 
-        pass: process.env.EMAIL_PASS
-    }
-});
+// --- Configure SendGrid ---
+sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
 
 // --- Create Tables ---
+// ... (All CREATE TABLE queries remain exactly the same) ...
 (async () => {
     try {
-        // 1. Users
+        // 1. Users Table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -68,7 +62,7 @@ const transporter = nodemailer.createTransport({
                 organization VARCHAR(255)
             );
         `);
-        // 2. Reports
+        // 2. Reports Table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS reports (
                 id SERIAL PRIMARY KEY,
@@ -78,7 +72,7 @@ const transporter = nodemailer.createTransport({
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        // 3. Logs
+        // 3. Logs Table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS logs (
                 id SERIAL PRIMARY KEY,
@@ -88,7 +82,7 @@ const transporter = nodemailer.createTransport({
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        // 4. Drafts
+        // 4. Drafts Table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS drafts (
                 id SERIAL PRIMARY KEY,
@@ -98,7 +92,7 @@ const transporter = nodemailer.createTransport({
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        // 5. Products (T-Job Sheet)
+        // 5. Products Table (T-Job Sheet)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS products (
                 id SERIAL PRIMARY KEY,
@@ -111,7 +105,8 @@ const transporter = nodemailer.createTransport({
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        // 6. Tasks (T-Job Sheet)
+        
+        // 6. Tasks Table (T-Job Sheet) - COMPLETE SCHEMA
         await pool.query(`
             CREATE TABLE IF NOT EXISTS tasks (
                 id SERIAL PRIMARY KEY,
@@ -141,10 +136,12 @@ const transporter = nodemailer.createTransport({
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // --- WebSocket Server Setup ---
+// ... (WebSocket logic remains the same) ...
 const wss = new WebSocket.Server({ server });
 const clients = new Map();
 
 wss.on('connection', async (ws, req) => {
+    // ... (WS connection logic) ...
     const token = url.parse(req.url, true).query.token;
     if (!token) return ws.close();
 
@@ -156,7 +153,7 @@ wss.on('connection', async (ws, req) => {
         ws.on('message', async (message) => {
             const data = JSON.parse(message);
             
-            // Find owners of the same organization to broadcast
+            // Find all owners of the same organization to broadcast to them
             try {
                 const result = await pool.query('SELECT id FROM users WHERE organization = $1 AND role = $2', [decoded.organization, 'owner']);
                 const owners = result.rows;
@@ -164,6 +161,7 @@ wss.on('connection', async (ws, req) => {
                 owners.forEach(owner => {
                     const ownerSocket = clients.get(owner.id);
                     if (ownerSocket && ownerSocket.readyState === WebSocket.OPEN) {
+                        // Forward the original message (could be CFT_UPDATE or FILENAME_UPDATE)
                         ownerSocket.send(JSON.stringify({ 
                             ...data,
                             counterId: userId, 
@@ -178,7 +176,7 @@ wss.on('connection', async (ws, req) => {
 
         ws.on('close', () => {
             clients.delete(userId);
-            // Notify owners of disconnect
+             // Notify owners that a counter has disconnected
             try {
                 pool.query('SELECT id FROM users WHERE organization = $1 AND role = $2', [decoded.organization, 'owner'])
                     .then(result => {
@@ -190,7 +188,7 @@ wss.on('connection', async (ws, req) => {
                         });
                     });
             } catch (dbError) {
-                console.error("Error notifying owners:", dbError);
+                console.error("Error notifying owners of disconnect:", dbError);
             }
         });
     } catch (err) {
@@ -281,6 +279,7 @@ app.get('/api/users', authenticate, async (req, res) => {
     }
 });
 
+// --- GET COUNTERS (for Owners) ---
 app.get('/api/users/counters', authenticate, async (req, res) => {
     const { organization, role } = req.user;
     if (role !== 'owner') {
@@ -320,7 +319,8 @@ app.post('/api/users/:id/lock-ip', authenticate, async (req, res) => {
     }
 });
 
-// --- REPORTS & LOGS ---
+// --- T-CAL REPORTS & LOGS ---
+
 app.get('/api/reports', authenticate, async (req, res) => {
     const { id, role, organization } = req.user;
     try {
@@ -399,10 +399,12 @@ app.delete('/api/reports/:id', authenticate, async (req, res) => {
                 [reportId, userId]
             );
         }
+
         if (result.rowCount === 0) {
             return res.status(404).send({ error: 'Report not found or permission denied.' });
         }
         res.status(200).send({ message: 'Report deleted successfully' });
+
     } catch (error) {
         console.error("Delete Report Error:", error);
         res.status(500).send({ error: 'Failed to delete report.' });
@@ -607,7 +609,29 @@ app.get('/api/tasks/buyers', authenticate, async (req, res) => {
     }
 });
 
+app.get('/api/tasks', authenticate, async (req, res) => {
+    // ... (logic remains same) ...
+    const { organization, id: userId, role } = req.user;
+    let query;
+    let params;
+    if (role === 'owner') {
+        query = "SELECT t.*, p.parts, u.name as assigned_to_name FROM tasks t JOIN products p ON t.product_id = p.id LEFT JOIN users u ON t.assigned_to_user_id = u.id WHERE t.organization = $1 ORDER BY t.created_at DESC";
+        params = [organization];
+    } else {
+        query = "SELECT t.*, p.parts FROM tasks t JOIN products p ON t.product_id = p.id WHERE t.organization = $1 AND t.assigned_to_user_id = $2 ORDER BY t.status, t.created_at DESC";
+        params = [organization, userId];
+    }
+    try {
+        const result = await pool.query(query, params);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Tasks Error:", error);
+        res.status(500).send({ error: 'Failed to fetch tasks.' });
+    }
+});
+
 app.post('/api/tasks', authenticate, async (req, res) => {
+    // ... (logic remains same) ...
     const { id: userId, organization, role } = req.user;
     const { productId, productName, quantity, assignedToUserId, assignDate, expiryDate, contractorName, buyerName, jobSheetRef } = req.body;
 
@@ -630,7 +654,7 @@ app.post('/api/tasks', authenticate, async (req, res) => {
     }
 });
 
-// --- COMPLETE TASK (with Email & PDF) ---
+// --- UPDATED: COMPLETE TASK WITH SENDGRID EMAIL ---
 app.put('/api/tasks/:id/complete', authenticate, upload.single('pdf'), async (req, res) => {
     const { id: userId, role } = req.user;
     const { id } = req.params;
@@ -643,7 +667,7 @@ app.put('/api/tasks/:id/complete', authenticate, upload.single('pdf'), async (re
         } 
         // If sent as FormData string (with file)
         else if (req.body.recordedData) {
-            recordedData = JSON.parse(req.body.recordedData);
+        recordedData = JSON.parse(req.body.recordedData);
         }
     } catch (e) {
         return res.status(400).send({ error: 'Invalid recorded data format.' });
@@ -670,11 +694,11 @@ app.put('/api/tasks/:id/complete', authenticate, upload.single('pdf'), async (re
         const ownerResult = await pool.query('SELECT email, name FROM users WHERE id = $1', [task.assigned_by_user_id]);
         const owner = ownerResult.rows[0];
 
-        // 3. Send Email with PDF attachment
+        // 3. Send Email using SendGrid
         if (owner && req.file) {
-            const mailOptions = {
-                from: process.env.EMAIL_USER || 'noreply@tcal.com',
+            const msg = {
                 to: owner.email,
+                from: process.env.EMAIL_USER, // Must be a verified sender in your SendGrid account
                 subject: `Job Completed: ${task.product_name} (Ref: ${task.job_sheet_ref || 'N/A'})`,
                 text: `
 Hello ${owner.name},
@@ -693,20 +717,22 @@ T-CAL System
                 `,
                 attachments: [
                     {
+                        content: req.file.buffer.toString('base64'), // SendGrid needs base64
                         filename: `JobReport_${task.product_name}.pdf`,
-                        content: req.file.buffer, // PDF file buffer
-                        contentType: 'application/pdf'
+                        type: 'application/pdf',
+                        disposition: 'attachment'
                     }
                 ]
             };
 
-            transporter.sendMail(mailOptions, (error, info) => {
-                if (error) {
-                    console.error('Error sending email:', error);
-                } else {
-                    console.log('Email sent: ' + info.response);
-                }
-            });
+            sgMail
+                .send(msg)
+                .then(() => {
+                    console.log('Email sent via SendGrid');
+                })
+                .catch((error) => {
+                    console.error('SendGrid Error:', error);
+                });
         }
 
         res.status(200).json(task);
@@ -717,10 +743,11 @@ T-CAL System
 });
 
 app.delete('/api/tasks/:id', authenticate, async (req, res) => {
-    const { organization, role } = req.user;
+    // ... (DELETE logic remains the same) ...
+     const { organization, role } = req.user;
     const { id } = req.params;
 
-    if (role !== 'owner') {
+         if (role !== 'owner') {
         return res.status(403).send({ error: 'Only owners can delete tasks.' });
     }
 
@@ -732,7 +759,7 @@ app.delete('/api/tasks/:id', authenticate, async (req, res) => {
         if (result.rowCount === 0) {
             return res.status(404).send({ error: 'Task not found or permission denied.' });
         }
-        res.status(200).send({ message: 'Task deleted successfully' });
+                res.status(200).send({ message: 'Task deleted successfully' });
     } catch (error) {
         console.error("Delete Task Error:", error);
         res.status(500).send({ error: 'Failed to delete task.' });
