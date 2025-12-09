@@ -102,9 +102,9 @@ export default function JobSheetCounter({ product, task, onBack }) {
         if (window.confirm("Are you sure you want to mark this job as complete and email the report?")) {
             try {
                 // 1. Calculate ALL Summary Data
-                let grandTotalTargetPcs = 0;
+                //let grandTotalTargetPcs = 0;
                 let grandTotalTargetCFT = 0;
-                let grandTotalLivePcs = 0;
+                //let grandTotalLivePcs = 0;
                 let grandTotalLiveCFT = 0;
                 
                 // Prepare data for rows
@@ -133,9 +133,9 @@ export default function JobSheetCounter({ product, task, onBack }) {
                          }
                     }
 
-                    grandTotalTargetPcs += tPcs;
+                    //grandTotalTargetPcs += tPcs;
                     grandTotalTargetCFT += tCFT;
-                    grandTotalLivePcs += lPcs;
+                    //grandTotalLivePcs += lPcs;
                     grandTotalLiveCFT += lCFT;
 
                     return {
