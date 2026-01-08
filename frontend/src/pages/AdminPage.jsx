@@ -118,24 +118,44 @@ function EditUserModal({ user, onClose, onUserUpdated }) {
 }
 
 // --- Timeline Modal Component ---
-function TimelineModal({ user, onClose }) {
+function TimelineModal({ user, onClose, onTimelineReset }) {
     const [timeline, setTimeline] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('timeline'); // 'timeline' or 'graph'
+    const [resetting, setResetting] = useState(false);
+
+    const fetchTimeline = async () => {
+        try {
+            const response = await api.get(`/activity/timeline/${user.id}?limit=500`);
+            setTimeline(response.data);
+        } catch (error) {
+            console.error("Failed to fetch timeline:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchTimeline = async () => {
-            try {
-                const response = await api.get(`/activity/timeline/${user.id}?limit=500`);
-                setTimeline(response.data);
-            } catch (error) {
-                console.error("Failed to fetch timeline:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
         fetchTimeline();
     }, [user.id]);
+
+    const handleResetTimeline = async () => {
+        if (!window.confirm(`Are you sure you want to reset all activity history for ${user.name} ${user.surname}? This action cannot be undone.`)) {
+            return;
+        }
+        setResetting(true);
+        try {
+            await api.delete(`/activity/timeline/${user.id}`);
+            setTimeline([]);
+            alert('Timeline reset successfully!');
+            if (onTimelineReset) onTimelineReset();
+        } catch (error) {
+            console.error("Failed to reset timeline:", error);
+            alert('Failed to reset timeline.');
+        } finally {
+            setResetting(false);
+        }
+    };
 
     const formatDate = (dateString) => {
         const date = new Date(dateString);
@@ -236,6 +256,13 @@ function TimelineModal({ user, onClose }) {
                         className={`px-4 py-2 rounded-lg font-medium ${activeTab === 'graph' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                     >
                         📊 Usage Graph
+                    </button>
+                    <button 
+                        onClick={handleResetTimeline}
+                        disabled={resetting || timeline.length === 0}
+                        className="ml-auto px-4 py-2 rounded-lg font-medium bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {resetting ? '⏳ Resetting...' : '🗑️ Reset Timeline'}
                     </button>
                 </div>
                 

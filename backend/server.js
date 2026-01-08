@@ -926,6 +926,21 @@ app.get('/api/activity/timeline/:userId', authenticate, async (req, res) => {
     }
 });
 
+// --- Reset/Delete activity timeline for a specific user (Admin only) ---
+app.delete('/api/activity/timeline/:userId', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    
+    const { userId } = req.params;
+    
+    try {
+        await pool.query('DELETE FROM user_activity WHERE user_id = $1', [userId]);
+        res.status(200).send({ success: true, message: 'Timeline reset successfully' });
+    } catch (error) {
+        console.error("Reset Timeline Error:", error);
+        res.status(500).send({ error: 'Failed to reset timeline.' });
+    }
+});
+
 // --- Mark user as offline (called on logout/tab close) ---
 app.post('/api/activity/offline', async (req, res) => {
     // Support both header auth and query param (for sendBeacon)
