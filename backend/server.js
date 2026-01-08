@@ -912,8 +912,21 @@ app.get('/api/activity/timeline/:userId', authenticate, async (req, res) => {
 });
 
 // --- Mark user as offline (called on logout/tab close) ---
-app.post('/api/activity/offline', authenticate, async (req, res) => {
-    const { id: userId } = req.user;
+app.post('/api/activity/offline', async (req, res) => {
+    // Support both header auth and query param (for sendBeacon)
+    let userId;
+    
+    try {
+        let token = req.headers.authorization?.split(' ')[1] || req.query.token;
+        if (!token) {
+            return res.status(401).send({ error: 'No token provided' });
+        }
+        
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userId = decoded.id;
+    } catch (error) {
+        return res.status(401).send({ error: 'Invalid token' });
+    }
     
     try {
         await pool.query(`

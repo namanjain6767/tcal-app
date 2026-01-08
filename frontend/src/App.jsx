@@ -56,6 +56,8 @@ export default function App() {
     const markOffline = useCallback(async () => {
         if (!token) return;
         try {
+            // Log the logout action first
+            await api.post('/activity/log', { action: 'logout', page: 'N/A' });
             await api.post('/activity/offline');
         } catch (error) {
             // Silently fail
@@ -95,8 +97,11 @@ export default function App() {
         const handleBeforeUnload = () => {
             if (token) {
                 // Use sendBeacon for reliable delivery on page close
-                const data = JSON.stringify({});
-                navigator.sendBeacon?.(`${api.defaults.baseURL}/activity/offline`, data);
+                // Include token in the URL as query param since sendBeacon can't send headers
+                navigator.sendBeacon?.(
+                    `${api.defaults.baseURL}/activity/offline?token=${encodeURIComponent(token)}`,
+                    JSON.stringify({})
+                );
             }
         };
 
