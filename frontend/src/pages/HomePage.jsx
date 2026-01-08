@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import '/homepage-styles.css'; // Import CSS directly - no flash
+import '../styles/homepage-styles.css'; // Import CSS from src/styles
 
 export default function HomePage({ setPage }) {
     const [isReady, setIsReady] = useState(false);
