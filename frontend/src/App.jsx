@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { jwtDecode } from 'jwt-decode';
+import api from './api';
 
 // Import Pages
 import LoginPage from './pages/LoginPage';
@@ -29,7 +30,79 @@ export default function App() {
     const [activeDraft, setActiveDraft] = useState(null);
     const [sessionInfo, setSessionInfo] = useState(null);
     const [loginRedirect, setLoginRedirect] = useState(null);
-    const [isLoading, setIsLoading] = useState(true); // Prevent flash on initial load 
+    const [isLoading, setIsLoading] = useState(true); // Prevent flash on initial load
+    const heartbeatInterval = useRef(null);
+    const previousPage = useRef(page);
+
+    // --- Activity Tracking Functions ---
+    const sendHeartbeat = useCallback(async (currentPage) => {
+        if (!token) return;
+        try {
+            await api.post('/activity/heartbeat', { page: currentPage });
+        } catch (error) {
+            // Silently fail - don't disrupt user experience
+        }
+    }, [token]);
+
+    const logActivity = useCallback(async (action, pageName, details = null) => {
+        if (!token) return;
+        try {
+            await api.post('/activity/log', { action, page: pageName, details });
+        } catch (error) {
+            // Silently fail
+        }
+    }, [token]);
+
+    const markOffline = useCallback(async () => {
+        if (!token) return;
+        try {
+            await api.post('/activity/offline');
+        } catch (error) {
+            // Silently fail
+        }
+    }, [token]);
+
+    // --- Heartbeat interval (every 30 seconds) ---
+    useEffect(() => {
+        if (token && user) {
+            // Send initial heartbeat
+            sendHeartbeat(page);
+            
+            // Set up interval
+            heartbeatInterval.current = setInterval(() => {
+                sendHeartbeat(page);
+            }, 30000); // Every 30 seconds
+
+            // Cleanup on unmount or token change
+            return () => {
+                if (heartbeatInterval.current) {
+                    clearInterval(heartbeatInterval.current);
+                }
+            };
+        }
+    }, [token, user, page, sendHeartbeat]);
+
+    // --- Log page changes ---
+    useEffect(() => {
+        if (token && user && page !== previousPage.current) {
+            logActivity('page_visit', page);
+            previousPage.current = page;
+        }
+    }, [page, token, user, logActivity]);
+
+    // --- Handle tab close / browser close ---
+    useEffect(() => {
+        const handleBeforeUnload = () => {
+            if (token) {
+                // Use sendBeacon for reliable delivery on page close
+                const data = JSON.stringify({});
+                navigator.sendBeacon?.(`${api.defaults.baseURL}/activity/offline`, data);
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [token]);
 
     // --- Save the current page to localStorage ---
     useEffect(() => {
@@ -88,7 +161,12 @@ export default function App() {
         setToken(newToken); // This will trigger the useEffect, which now handles redirects
     };
     
-    const handleLogout = () => {
+    const handleLogout = async () => {
+        // Mark user as offline before clearing token
+        await markOffline();
+        if (heartbeatInterval.current) {
+            clearInterval(heartbeatInterval.current);
+        }
         localStorage.removeItem('token'); // Only remove token, not all local storage
         localStorage.removeItem('currentPage'); // Clear last page on logout
         setActiveDraft(null);

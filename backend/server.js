@@ -139,6 +139,31 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
                 completed_data JSONB
             );
         `);
+
+        // 7. User Activity Table - Track user sessions and page visits
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_activity (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                action VARCHAR(100) NOT NULL,
+                page VARCHAR(100),
+                details JSONB,
+                ip_address VARCHAR(50),
+                user_agent TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // 8. User Sessions Table - Track online status
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                current_page VARCHAR(100),
+                is_online BOOLEAN DEFAULT TRUE
+            );
+        `);
     } catch (err) {
         console.error("Error creating tables:", err);
     }
@@ -317,6 +342,21 @@ app.delete('/api/users/:id', authenticate, async (req, res) => {
     } catch (error) {
         console.error("Delete User Error:", error);
         res.status(500).send({ error: 'Failed to delete user.' });
+    }
+});
+
+app.put('/api/users/:id', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    const { name, surname, email, phone, role, organization } = req.body;
+    try {
+        await pool.query(
+            'UPDATE users SET name = $1, surname = $2, email = $3, phone = $4, role = $5, organization = $6 WHERE id = $7',
+            [name, surname, email, phone, role, organization, req.params.id]
+        );
+        res.status(200).send({ message: 'User updated successfully' });
+    } catch (error) {
+        console.error("Update User Error:", error);
+        res.status(500).send({ error: 'Failed to update user.' });
     }
 });
 
@@ -775,6 +815,120 @@ app.delete('/api/tasks/:id', authenticate, async (req, res) => {
     } catch (error) {
         console.error("Delete Task Error:", error);
         res.status(500).send({ error: 'Failed to delete task.' });
+    }
+});
+
+
+// ==========================================
+//       USER ACTIVITY TRACKING ENDPOINTS
+// ==========================================
+
+// --- Heartbeat - Update user's online status ---
+app.post('/api/activity/heartbeat', authenticate, async (req, res) => {
+    const { id: userId } = req.user;
+    const { page } = req.body;
+    
+    try {
+        await pool.query(`
+            INSERT INTO user_sessions (user_id, last_active, current_page, is_online)
+            VALUES ($1, CURRENT_TIMESTAMP, $2, TRUE)
+            ON CONFLICT (user_id) 
+            DO UPDATE SET last_active = CURRENT_TIMESTAMP, current_page = $2, is_online = TRUE
+        `, [userId, page]);
+        
+        res.status(200).send({ success: true });
+    } catch (error) {
+        console.error("Heartbeat Error:", error);
+        res.status(500).send({ error: 'Failed to update heartbeat.' });
+    }
+});
+
+// --- Log user activity (page visit, action, etc.) ---
+app.post('/api/activity/log', authenticate, async (req, res) => {
+    const { id: userId } = req.user;
+    const { action, page, details } = req.body;
+    const ip = req.ip;
+    const userAgent = req.headers['user-agent'];
+    
+    try {
+        await pool.query(`
+            INSERT INTO user_activity (user_id, action, page, details, ip_address, user_agent)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        `, [userId, action, page, details ? JSON.stringify(details) : null, ip, userAgent]);
+        
+        res.status(201).send({ success: true });
+    } catch (error) {
+        console.error("Activity Log Error:", error);
+        res.status(500).send({ error: 'Failed to log activity.' });
+    }
+});
+
+// --- Get all users with their activity status (Admin only) ---
+app.get('/api/activity/users', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    
+    try {
+        const result = await pool.query(`
+            SELECT 
+                u.id, u.name, u.surname, u.email, u.role, u.organization, u.last_login_ip,
+                s.last_active, s.current_page, s.is_online,
+                CASE 
+                    WHEN s.last_active > NOW() - INTERVAL '2 minutes' THEN TRUE 
+                    ELSE FALSE 
+                END as is_currently_active
+            FROM users u
+            LEFT JOIN user_sessions s ON u.id = s.user_id
+            ORDER BY s.last_active DESC NULLS LAST
+        `);
+        
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch User Activity Error:", error);
+        res.status(500).send({ error: 'Failed to fetch user activity.' });
+    }
+});
+
+// --- Get activity timeline for a specific user (Admin only) ---
+app.get('/api/activity/timeline/:userId', authenticate, async (req, res) => {
+    if (!req.user.isAdmin) return res.status(403).send({ error: 'Forbidden' });
+    
+    const { userId } = req.params;
+    const { limit = 50 } = req.query;
+    
+    try {
+        const result = await pool.query(`
+            SELECT action, page, details, ip_address, created_at
+            FROM user_activity
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+        `, [userId, parseInt(limit)]);
+        
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Timeline Error:", error);
+        res.status(500).send({ error: 'Failed to fetch timeline.' });
+    }
+});
+
+// --- Mark user as offline (called on logout/tab close) ---
+app.post('/api/activity/offline', authenticate, async (req, res) => {
+    const { id: userId } = req.user;
+    
+    try {
+        await pool.query(`
+            UPDATE user_sessions SET is_online = FALSE WHERE user_id = $1
+        `, [userId]);
+        
+        await pool.query(`
+            INSERT INTO user_activity (user_id, action, page)
+            VALUES ($1, 'logout', 'N/A')
+        `, [userId]);
+        
+        res.status(200).send({ success: true });
+    } catch (error) {
+        console.error("Offline Error:", error);
+        res.status(500).send({ error: 'Failed to mark offline.' });
     }
 });
 
