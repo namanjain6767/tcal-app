@@ -7,24 +7,25 @@ export default function HomePage({ setPage }) {
         const stylesheet = document.createElement('link');
         stylesheet.id = 'homepage-stylesheet';
         stylesheet.rel = 'stylesheet';
-        stylesheet.href = '/homepage-styles.css'; // Path to the css file in the public folder
+        stylesheet.href = '/homepage-styles.css';
         document.head.appendChild(stylesheet);
 
-        // --- Loading Screen ---
+        // --- Loading Screen - Hide quickly after CSS loads ---
         const loadingScreen = document.getElementById('loadingScreen');
         if (loadingScreen) {
+            // Hide loading screen after a brief moment (reduced from 1500ms)
             setTimeout(() => {
                 loadingScreen.classList.add('hidden');
                 document.body.style.overflow = 'visible';
-            }, 1500);
+            }, 600);
         }
 
-        // --- Counter Animations ---
+        // --- Counter Animations (optimized) ---
         const counters = document.querySelectorAll('.stat-number, .trust-number');
         const animateCounter = (element) => {
             const target = parseFloat(element.dataset.target);
             if (isNaN(target)) return;
-            const duration = 2000;
+            const duration = 1000; // Reduced from 2000ms
             let start = 0;
             const step = (timestamp) => {
                 if (!start) start = timestamp;
@@ -158,18 +159,23 @@ export default function HomePage({ setPage }) {
             <section className="about" id="about">
                 <div className="container">
                     <div className="section-header">
-                        <h2 className="section-title">Meeting Indian industrail standards through excellent software engineering</h2>
+                        <h2 className="section-title">Built for Indian Industries</h2>
                     </div>
-                    <div className="about-grid">
-                         <div className="about-content">
-                            <h3>Our Mission</h3>
-                            <p>To revolutionize India's industrial landscape through intelligent, reliable, and scalable software solutions that drive efficiency, safety, and growth.</p>
+                    <div className="about-features">
+                        <div className="about-feature">
+                            <span className="feature-icon">🎯</span>
+                            <h4>Our Mission</h4>
+                            <p>To revolutionize India's industrial landscape through intelligent, reliable, and scalable software solutions.</p>
                         </div>
-                        <div className="about-visual">
-                             <div className="about-card floating">
-                                <h4>Engineering Heritage</h4>
-                                <p>Built on rigorous engineering standards with a touch of industrial expertise</p>
-                            </div>
+                        <div className="about-feature">
+                            <span className="feature-icon">⚡</span>
+                            <h4>Fast & Reliable</h4>
+                            <p>Lightning-fast performance optimized for real-world industrial environments and workflows.</p>
+                        </div>
+                        <div className="about-feature">
+                            <span className="feature-icon">🔒</span>
+                            <h4>Secure & Trusted</h4>
+                            <p>Enterprise-grade security protecting your business data with industry-standard encryption.</p>
                         </div>
                     </div>
                 </div>
@@ -178,14 +184,23 @@ export default function HomePage({ setPage }) {
             <section className="software" id="software">
                 <div className="container">
                     <div className="section-header">
-                        <h2 className="section-title">Flagship Solution Ready, More Coming Soon</h2>
+                        <h2 className="section-title">Our Software Solutions</h2>
                     </div>
-                    <div className="software-showcase">
-                        <div className="flagship-software">
-                            <div className="software-header">
-                                <h3 className="software-title">T-Cal</h3>
-                                <p className="software-tagline">Precision Timber Calculator engineered to streamline estimation, optimization, and procurement across the wood supply chain</p>
-                            </div>
+                    <div className="software-grid">
+                        <div className="software-card">
+                            <div className="software-badge live">Live</div>
+                            <h3 className="software-title">T-Cal</h3>
+                            <p className="software-tagline">Precision Timber Calculator for streamlined estimation, optimization, and procurement across the wood supply chain.</p>
+                        </div>
+                        <div className="software-card">
+                            <div className="software-badge live">Live</div>
+                            <h3 className="software-title">T-Job Sheet</h3>
+                            <p className="software-tagline">Digital job sheet management system for tracking production tasks, assigning work to teams, and monitoring completion status.</p>
+                        </div>
+                        <div className="software-card">
+                            <div className="software-badge coming">Coming Soon</div>
+                            <h3 className="software-title">T-Connect</h3>
+                            <p className="software-tagline">A marketplace connecting timber sellers and buyers, enabling seamless trade, price discovery, and business networking across the industry.</p>
                         </div>
                     </div>
                 </div>
@@ -216,25 +231,16 @@ export default function HomePage({ setPage }) {
             <section className="contact" id="contact">
                 <div className="container">
                     <div className="section-header">
-                        <h2 className="section-title">Ready to Transform Your Industrial Operations?</h2>
+                        <h2 className="section-title">Get In Touch</h2>
                     </div>
-                    <div className="contact-grid">
-                        <div className="contact-info">
-                            <h3>Business Inquiries</h3>
-                            <div className="contact-item">
-                                <a href="mailto:Naman@draveta.com">Naman@draveta.com</a>
-                            </div>
-                             <div className="contact-item">
-                                <a href="tel:+917375019000">+91 73750 19000</a>
-                            </div>
+                    <div className="contact-simple">
+                        <div className="contact-item-large">
+                            <span className="contact-icon">📧</span>
+                            <a href="mailto:namanjain6767@gmail.com">namanjain6767@gmail.com</a>
                         </div>
-                        <div className="contact-form-container">
-                            <form className="contact-form" id="contactForm">
-                                <input type="text" className="form-control" placeholder="Your Name" required />
-                                <input type="email" className="form-control" placeholder="Business Email" required />
-                                <textarea className="form-control" rows="4" placeholder="Tell us about your needs..." required></textarea>
-                                <button type="submit" className="btn btn--primary btn--full-width">Send Inquiry</button>
-                            </form>
+                        <div className="contact-item-large">
+                            <span className="contact-icon">📞</span>
+                            <a href="tel:+919829011726">+91 98290 11726</a>
                         </div>
                     </div>
                 </div>
@@ -242,7 +248,7 @@ export default function HomePage({ setPage }) {
 
             <footer className="footer">
                 <div className="container">
-                    <p>&copy; 2025 Draveta Technologies. All rights reserved.</p>
+                    <p>&copy; 2026 Draveta Technologies. All rights reserved.</p>
                 </div>
             </footer>
         </div>
