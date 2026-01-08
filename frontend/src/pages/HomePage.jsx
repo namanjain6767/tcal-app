@@ -1,23 +1,20 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import '/homepage-styles.css'; // Import CSS directly - no flash
 
 export default function HomePage({ setPage }) {
+    const [isReady, setIsReady] = useState(false);
 
     useEffect(() => {
-        // --- Dynamically add the homepage's stylesheet ---
-        const stylesheet = document.createElement('link');
-        stylesheet.id = 'homepage-stylesheet';
-        stylesheet.rel = 'stylesheet';
-        stylesheet.href = '/homepage-styles.css';
-        document.head.appendChild(stylesheet);
+        // Small delay to ensure CSS is applied
+        const timer = setTimeout(() => setIsReady(true), 50);
 
-        // --- Loading Screen - Hide quickly after CSS loads ---
+        // --- Loading Screen - Hide after ready ---
         const loadingScreen = document.getElementById('loadingScreen');
-        if (loadingScreen) {
-            // Hide loading screen after a brief moment (reduced from 1500ms)
+        if (loadingScreen && isReady) {
             setTimeout(() => {
                 loadingScreen.classList.add('hidden');
                 document.body.style.overflow = 'visible';
-            }, 600);
+            }, 500);
         }
 
         // --- Counter Animations (optimized) ---
@@ -70,17 +67,43 @@ export default function HomePage({ setPage }) {
         if (secondaryCta) secondaryCta.onclick = () => document.querySelector('#contact')?.scrollIntoView({ behavior: 'smooth' });
 
 
-        // Cleanup function to remove event listeners and the stylesheet when the component unmounts
+        // Cleanup function
         return () => {
+            clearTimeout(timer);
             document.querySelectorAll('a[href^="#"]').forEach(anchor => {
                 anchor.removeEventListener('click', handleLinkClick);
             });
-            const stylesheetToRemove = document.getElementById('homepage-stylesheet');
-            if (stylesheetToRemove) {
-                stylesheetToRemove.remove();
-            }
         };
-    }, [setPage]);
+    }, [setPage, isReady]);
+
+    // Show nothing until CSS is ready (prevents flash)
+    if (!isReady) {
+        return (
+            <div style={{ 
+                position: 'fixed', 
+                inset: 0, 
+                background: 'linear-gradient(135deg, #000, #333)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                zIndex: 9999 
+            }}>
+                <div style={{ textAlign: 'center', color: '#fff' }}>
+                    <div style={{ 
+                        width: 60, 
+                        height: 60, 
+                        border: '3px solid #666', 
+                        borderTopColor: '#fff', 
+                        borderRadius: '50%', 
+                        margin: '0 auto 16px',
+                        animation: 'spin 0.8s linear infinite'
+                    }}></div>
+                    <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '0.2em' }}>DRAVETA</div>
+                </div>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+        );
+    }
 
 
     return (
