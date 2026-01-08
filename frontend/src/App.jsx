@@ -28,7 +28,8 @@ export default function App() {
     const [page, setPage] = useState(getLastPage());
     const [activeDraft, setActiveDraft] = useState(null);
     const [sessionInfo, setSessionInfo] = useState(null);
-    const [loginRedirect, setLoginRedirect] = useState(null); 
+    const [loginRedirect, setLoginRedirect] = useState(null);
+    const [isLoading, setIsLoading] = useState(true); // Prevent flash on initial load 
 
     // --- Save the current page to localStorage ---
     useEffect(() => {
@@ -80,6 +81,7 @@ export default function App() {
                 setPage('home');
             }
         }
+        setIsLoading(false); // Auth check complete
     }, [token, loginRedirect]); // Removed 'page' from dependency array to prevent loops
 
     const handleLoginSuccess = (newToken) => {
@@ -125,6 +127,17 @@ export default function App() {
             default: return <HomePage setPage={setPage} />;
         }
     };
+
+    // Show minimal loading spinner until auth check completes
+    if (isLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-100">
+                <div className="text-center">
+                    <div className="w-10 h-10 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
+                </div>
+            </div>
+        );
+    }
 
     return <div className="min-h-screen">{renderPage()}</div>;
 }
