@@ -11,15 +11,28 @@ const api = axios.create({
     baseURL: API_URL,
     headers: {
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
     },
 });
 
 // 3. Automatically add the authentication token to every request
+// Also add a timestamp to prevent browser/CDN caching
 api.interceptors.request.use(config => {
     const token = getAuthToken();
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // Add cache-busting timestamp to GET requests
+    if (config.method === 'get') {
+        config.params = {
+            ...config.params,
+            _t: Date.now()
+        };
+    }
+    
     return config;
 });
 

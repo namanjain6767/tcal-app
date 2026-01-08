@@ -31,6 +31,18 @@ app.use(cors({
 app.use(express.json());
 app.set('trust proxy', true);
 
+// --- Prevent Browser Caching for API Responses ---
+// This ensures every request reaches the server (visible in Render logs)
+app.use('/api', (req, res, next) => {
+    res.set({
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store'
+    });
+    next();
+});
+
 // --- PostgreSQL Database Connection ---
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
