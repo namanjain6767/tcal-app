@@ -38,18 +38,21 @@ export default function App() {
     const sendHeartbeat = useCallback(async (currentPage) => {
         if (!token) return;
         try {
+            console.log('Sending heartbeat for page:', currentPage);
             await api.post('/activity/heartbeat', { page: currentPage });
         } catch (error) {
-            // Silently fail - don't disrupt user experience
+            console.error('Heartbeat error:', error.response?.data || error.message);
         }
     }, [token]);
 
     const logActivity = useCallback(async (action, pageName, details = null) => {
         if (!token) return;
         try {
+            console.log('Logging activity:', action, pageName);
             await api.post('/activity/log', { action, page: pageName, details });
+            console.log('Activity logged successfully');
         } catch (error) {
-            // Silently fail
+            console.error('Activity log error:', error.response?.data || error.message);
         }
     }, [token]);
 

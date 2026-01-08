@@ -279,6 +279,7 @@ app.post('/api/register', authenticate, async (req, res) => {
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
     const ip = req.ip;
+    const userAgent = req.headers['user-agent'];
     try {
         const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
         const user = result.rows[0];
@@ -292,6 +293,20 @@ app.post('/api/login', async (req, res) => {
         }
 
         await pool.query('UPDATE users SET last_login_ip = $1 WHERE id = $2', [ip, user.id]);
+
+        // Log login activity
+        await pool.query(`
+            INSERT INTO user_activity (user_id, action, page, ip_address, user_agent)
+            VALUES ($1, 'login', 'login', $2, $3)
+        `, [user.id, ip, userAgent]);
+
+        // Create/update user session
+        await pool.query(`
+            INSERT INTO user_sessions (user_id, last_active, current_page, is_online)
+            VALUES ($1, NOW(), 'login', TRUE)
+            ON CONFLICT (user_id) 
+            DO UPDATE SET last_active = NOW(), current_page = 'login', is_online = TRUE
+        `, [user.id]);
 
         const token = jwt.sign(
             { id: user.id, isAdmin: user.is_admin, name: user.name, surname: user.surname, role: user.role, organization: user.organization },
@@ -854,12 +869,12 @@ app.post('/api/activity/log', authenticate, async (req, res) => {
         await pool.query(`
             INSERT INTO user_activity (user_id, action, page, details, ip_address, user_agent)
             VALUES ($1, $2, $3, $4, $5, $6)
-        `, [userId, action, page, details ? JSON.stringify(details) : null, ip, userAgent]);
+        `, [userId, action || 'unknown', page || 'unknown', details ? JSON.stringify(details) : null, ip, userAgent]);
         
         res.status(201).send({ success: true });
     } catch (error) {
-        console.error("Activity Log Error:", error);
-        res.status(500).send({ error: 'Failed to log activity.' });
+        console.error("Activity Log Error:", error.message);
+        res.status(500).send({ error: 'Failed to log activity.', details: error.message });
     }
 });
 
