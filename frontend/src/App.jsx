@@ -21,6 +21,118 @@ const getAuthToken = () => localStorage.getItem('token');
 // --- Helper function to get the last page from local storage ---
 const getLastPage = () => localStorage.getItem('currentPage') || 'home';
 
+// --- IndexedDB for Background Sync ---
+const DB_NAME = 'tcal-offline-db';
+const DB_VERSION = 1;
+const ACTIVITY_STORE = 'activities';
+const CONFIG_STORE = 'config';
+
+const openDatabase = () => {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(ACTIVITY_STORE)) {
+                db.createObjectStore(ACTIVITY_STORE, { keyPath: 'id', autoIncrement: true });
+            }
+            if (!db.objectStoreNames.contains(CONFIG_STORE)) {
+                db.createObjectStore(CONFIG_STORE, { keyPath: 'key' });
+            }
+        };
+    });
+};
+
+const saveActivityToIDB = async (activity) => {
+    try {
+        const db = await openDatabase();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(ACTIVITY_STORE, 'readwrite');
+            const store = transaction.objectStore(ACTIVITY_STORE);
+            const request = store.add(activity);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+        });
+    } catch (error) {
+        console.error('IDB save error:', error);
+    }
+};
+
+const saveConfigToIDB = async (key, value) => {
+    try {
+        const db = await openDatabase();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(CONFIG_STORE, 'readwrite');
+            const store = transaction.objectStore(CONFIG_STORE);
+            const request = store.put({ key, value });
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+        });
+    } catch (error) {
+        console.error('IDB config save error:', error);
+    }
+};
+
+const clearActivitiesFromIDB = async () => {
+    try {
+        const db = await openDatabase();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(ACTIVITY_STORE, 'readwrite');
+            const store = transaction.objectStore(ACTIVITY_STORE);
+            const request = store.clear();
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+        });
+    } catch (error) {
+        console.error('IDB clear error:', error);
+    }
+};
+
+// eslint-disable-next-line no-unused-vars
+const getActivitiesFromIDB = async () => {
+    try {
+        const db = await openDatabase();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(ACTIVITY_STORE, 'readonly');
+            const store = transaction.objectStore(ACTIVITY_STORE);
+            const request = store.getAll();
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+        });
+    } catch (error) {
+        console.error('IDB get error:', error);
+        return [];
+    }
+};
+
+// --- Service Worker Registration ---
+const registerServiceWorker = async () => {
+    if ('serviceWorker' in navigator) {
+        try {
+            const registration = await navigator.serviceWorker.register('/sw.js');
+            console.log('Service Worker registered:', registration.scope);
+            return registration;
+        } catch (error) {
+            console.error('Service Worker registration failed:', error);
+        }
+    }
+    return null;
+};
+
+// Request background sync
+const requestBackgroundSync = async () => {
+    if ('serviceWorker' in navigator && 'SyncManager' in window) {
+        try {
+            const registration = await navigator.serviceWorker.ready;
+            await registration.sync.register('tcal-activity-sync');
+            console.log('Background sync registered');
+        } catch (error) {
+            console.error('Background sync registration failed:', error);
+        }
+    }
+};
+
 
 export default function App() {
     const [token, setToken] = useState(getAuthToken());
@@ -34,6 +146,36 @@ export default function App() {
     const heartbeatInterval = useRef(null);
     const previousPage = useRef(page);
     const [isOnline, setIsOnline] = useState(navigator.onLine);
+    const [backgroundSyncSupported, setBackgroundSyncSupported] = useState(false);
+
+    // --- Register Service Worker on mount ---
+    useEffect(() => {
+        const initServiceWorker = async () => {
+            const reg = await registerServiceWorker();
+            if (reg) {
+                setBackgroundSyncSupported('SyncManager' in window);
+                
+                // Listen for messages from Service Worker
+                navigator.serviceWorker.addEventListener('message', (event) => {
+                    if (event.data.type === 'SYNC_COMPLETE') {
+                        console.log(`Background sync complete: ${event.data.synced}/${event.data.total}`);
+                        // Clear local queues after successful background sync
+                        clearOfflineQueue();
+                        clearActivitiesFromIDB();
+                    }
+                });
+            }
+        };
+        initServiceWorker();
+    }, []);
+
+    // --- Save token and API URL to IndexedDB for Service Worker access ---
+    useEffect(() => {
+        if (token) {
+            saveConfigToIDB('token', token);
+            saveConfigToIDB('apiUrl', api.defaults.baseURL);
+        }
+    }, [token]);
 
     // --- Offline Activity Queue Management ---
     const OFFLINE_ACTIVITY_KEY = 'offline_activity_queue';
@@ -47,15 +189,27 @@ export default function App() {
         }
     };
 
-    const saveToOfflineQueue = (activity) => {
-        const queue = getOfflineQueue();
-        queue.push({
+    const saveToOfflineQueue = async (activity) => {
+        const activityData = {
             ...activity,
             timestamp: new Date().toISOString(),
             queued_at: Date.now()
-        });
+        };
+        
+        // Save to localStorage (fallback)
+        const queue = getOfflineQueue();
+        queue.push(activityData);
         localStorage.setItem(OFFLINE_ACTIVITY_KEY, JSON.stringify(queue));
-        console.log('Activity saved offline:', activity.action, activity.page);
+        
+        // Save to IndexedDB for Service Worker access
+        await saveActivityToIDB(activityData);
+        
+        // Request background sync if supported
+        if (backgroundSyncSupported) {
+            await requestBackgroundSync();
+        }
+        
+        console.log('Activity saved offline:', activity.action || activity.type, activity.page);
     };
 
     const clearOfflineQueue = () => {
@@ -97,6 +251,7 @@ export default function App() {
         }
         
         clearOfflineQueue();
+        await clearActivitiesFromIDB();
         console.log(`Successfully synced ${synced} offline activities`);
     }, [token]);
 
@@ -282,6 +437,10 @@ export default function App() {
     };
     
     const handleLogout = async () => {
+        // Try to sync any pending offline activities before logout
+        if (navigator.onLine) {
+            await syncOfflineActivities();
+        }
         // Mark user as offline before clearing token
         await markOffline();
         if (heartbeatInterval.current) {
@@ -289,6 +448,7 @@ export default function App() {
         }
         localStorage.removeItem('token'); // Only remove token, not all local storage
         localStorage.removeItem('currentPage'); // Clear last page on logout
+        // Keep offline_activity_queue - will sync on next login
         setActiveDraft(null);
         setSessionInfo(null);
         setToken(null);
