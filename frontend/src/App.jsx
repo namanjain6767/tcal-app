@@ -33,37 +33,149 @@ export default function App() {
     const [isLoading, setIsLoading] = useState(true); // Prevent flash on initial load
     const heartbeatInterval = useRef(null);
     const previousPage = useRef(page);
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+    // --- Offline Activity Queue Management ---
+    const OFFLINE_ACTIVITY_KEY = 'offline_activity_queue';
+    const OFFLINE_HEARTBEAT_KEY = 'offline_last_heartbeat';
+
+    const getOfflineQueue = () => {
+        try {
+            return JSON.parse(localStorage.getItem(OFFLINE_ACTIVITY_KEY) || '[]');
+        } catch {
+            return [];
+        }
+    };
+
+    const saveToOfflineQueue = (activity) => {
+        const queue = getOfflineQueue();
+        queue.push({
+            ...activity,
+            timestamp: new Date().toISOString(),
+            queued_at: Date.now()
+        });
+        localStorage.setItem(OFFLINE_ACTIVITY_KEY, JSON.stringify(queue));
+        console.log('Activity saved offline:', activity.action, activity.page);
+    };
+
+    const clearOfflineQueue = () => {
+        localStorage.removeItem(OFFLINE_ACTIVITY_KEY);
+    };
+
+    // --- Sync offline activities when back online ---
+    const syncOfflineActivities = useCallback(async () => {
+        if (!token || !navigator.onLine) return;
+        
+        const queue = getOfflineQueue();
+        if (queue.length === 0) return;
+
+        console.log(`Syncing ${queue.length} offline activities...`);
+        
+        let synced = 0;
+        for (const activity of queue) {
+            try {
+                if (activity.type === 'heartbeat') {
+                    await api.post('/activity/heartbeat', { page: activity.page });
+                } else {
+                    await api.post('/activity/log', { 
+                        action: activity.action, 
+                        page: activity.page, 
+                        details: { 
+                            ...activity.details,
+                            offline_recorded_at: activity.timestamp 
+                        }
+                    });
+                }
+                synced++;
+            } catch (error) {
+                console.error('Failed to sync activity:', error);
+                // Keep remaining items in queue
+                const remaining = queue.slice(synced);
+                localStorage.setItem(OFFLINE_ACTIVITY_KEY, JSON.stringify(remaining));
+                return;
+            }
+        }
+        
+        clearOfflineQueue();
+        console.log(`Successfully synced ${synced} offline activities`);
+    }, [token]);
+
+    // --- Online/Offline detection ---
+    useEffect(() => {
+        const handleOnline = () => {
+            console.log('Back online - syncing activities...');
+            setIsOnline(true);
+            syncOfflineActivities();
+        };
+        
+        const handleOffline = () => {
+            console.log('Gone offline - activities will be stored locally');
+            setIsOnline(false);
+        };
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        // Sync any pending activities on mount
+        if (navigator.onLine && token) {
+            syncOfflineActivities();
+        }
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, [syncOfflineActivities, token]);
 
     // --- Activity Tracking Functions ---
     const sendHeartbeat = useCallback(async (currentPage) => {
         if (!token) return;
+        
+        if (!navigator.onLine) {
+            // Store heartbeat locally when offline
+            saveToOfflineQueue({ type: 'heartbeat', page: currentPage });
+            return;
+        }
+        
         try {
-            console.log('Sending heartbeat for page:', currentPage);
             await api.post('/activity/heartbeat', { page: currentPage });
         } catch (error) {
-            console.error('Heartbeat error:', error.response?.data || error.message);
+            // If request fails, store offline
+            saveToOfflineQueue({ type: 'heartbeat', page: currentPage });
         }
     }, [token]);
 
     const logActivity = useCallback(async (action, pageName, details = null) => {
         if (!token) return;
+        
+        if (!navigator.onLine) {
+            // Store activity locally when offline
+            saveToOfflineQueue({ type: 'activity', action, page: pageName, details });
+            return;
+        }
+        
         try {
-            console.log('Logging activity:', action, pageName);
             await api.post('/activity/log', { action, page: pageName, details });
-            console.log('Activity logged successfully');
         } catch (error) {
-            console.error('Activity log error:', error.response?.data || error.message);
+            // If request fails, store offline
+            saveToOfflineQueue({ type: 'activity', action, page: pageName, details });
         }
     }, [token]);
 
     const markOffline = useCallback(async () => {
         if (!token) return;
+        
+        // Always try to log logout, store locally if offline
+        if (!navigator.onLine) {
+            saveToOfflineQueue({ type: 'activity', action: 'logout', page: 'N/A' });
+            return;
+        }
+        
         try {
-            // Log the logout action first
             await api.post('/activity/log', { action: 'logout', page: 'N/A' });
             await api.post('/activity/offline');
         } catch (error) {
-            // Silently fail
+            saveToOfflineQueue({ type: 'activity', action: 'logout', page: 'N/A' });
         }
     }, [token]);
 
@@ -225,5 +337,23 @@ export default function App() {
         );
     }
 
-    return <div className="min-h-screen">{renderPage()}</div>;
+    const offlineQueueCount = getOfflineQueue().length;
+
+    return (
+        <div className="min-h-screen">
+            {/* Offline Indicator */}
+            {(!isOnline || offlineQueueCount > 0) && token && (
+                <div className={`fixed bottom-4 right-4 z-50 px-4 py-2 rounded-lg shadow-lg text-sm font-medium ${
+                    isOnline ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
+                }`}>
+                    {!isOnline ? (
+                        <span>📡 Offline Mode - Activities saved locally</span>
+                    ) : offlineQueueCount > 0 ? (
+                        <span>🔄 Syncing {offlineQueueCount} activities...</span>
+                    ) : null}
+                </div>
+            )}
+            {renderPage()}
+        </div>
+    );
 }
