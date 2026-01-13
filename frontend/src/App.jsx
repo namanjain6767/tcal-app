@@ -347,9 +347,9 @@ export default function App() {
                     isOnline ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
                 }`}>
                     {!isOnline ? (
-                        <span>📡 Offline Mode - Activities saved locally</span>
+                        <span>📡 Offline Mode</span>
                     ) : offlineQueueCount > 0 ? (
-                        <span>🔄 Syncing {offlineQueueCount} activities...</span>
+                        <span>🔄 Syncing {offlineQueueCount} Data...</span>
                     ) : null}
                 </div>
             )}

@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCAL Application - Complete Workflow & Features</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .flow-arrow {
+            position: relative;
+        }
+        .flow-arrow::after {
+            content: '→';
+            position: absolute;
+            right: -20px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 24px;
+            color: #6366f1;
+        }
+        .feature-box {
+            transition: all 0.3s ease;
+        }
+        .feature-box:hover {
+            transform: scale(1.02);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+        }
+        .connector {
+            border-left: 3px dashed #d1d5db;
+            margin-left: 20px;
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="text-center mb-10">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">🌲 TCAL Application Workflow</h1>
+            <p class="text-gray-600">Complete Feature Map & User Flow Diagram</p>
+            <p class="text-sm text-gray-500 mt-2">Generated: January 13, 2026</p>
+        </div>
+
+        <!-- Legend -->
+        <div class="bg-white p-4 rounded-lg shadow mb-8 flex flex-wrap gap-4 justify-center">
+            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-blue-500 rounded"></span> Public Pages</div>
+            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-green-500 rounded"></span> Counter Features</div>
+            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-purple-500 rounded"></span> Owner Features</div>
+            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-red-500 rounded"></span> Admin Features</div>
+            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-yellow-500 rounded"></span> Shared Features</div>
+            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-indigo-500 rounded"></span> Background Services</div>
+        </div>
+
+        <!-- Main Flow -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Column 1: Entry Points -->
+            <div class="space-y-6">
+                <h2 class="text-xl font-bold text-gray-700 border-b-2 border-blue-500 pb-2">🚪 Entry Points</h2>
+                
+                <!-- Home Page -->
+                <div class="feature-box bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-blue-800">🏠 HomePage</h3>
+                    <p class="text-sm text-gray-600 mt-1">Public landing page</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Company information</li>
+                        <li>✅ Flagship solutions (T-Cal, T-Job Sheet, T-Connect)</li>
+                        <li>✅ About section with feature cards</li>
+                        <li>✅ Contact information</li>
+                        <li>✅ Optimized CSS loading</li>
+                        <li>✅ Vercel Speed Insights</li>
+                    </ul>
+                </div>
+
+                <!-- Apps List -->
+                <div class="feature-box bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-blue-800">📱 AppsListPage</h3>
+                    <p class="text-sm text-gray-600 mt-1">Application selector</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ T-Cal app card</li>
+                        <li>✅ T-Job Sheet app card</li>
+                        <li>✅ Redirect to login if not authenticated</li>
+                        <li>✅ Remember intended destination</li>
+                    </ul>
+                </div>
+
+                <!-- Login Page -->
+                <div class="feature-box bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-blue-800">🔐 LoginPage</h3>
+                    <p class="text-sm text-gray-600 mt-1">Authentication</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Email/Password login</li>
+                        <li>✅ JWT token generation</li>
+                        <li>✅ IP address validation</li>
+                        <li>✅ Role-based redirect (Counter/Owner)</li>
+                        <li>✅ Login activity logging</li>
+                        <li>✅ Session creation</li>
+                    </ul>
+                </div>
+
+                <!-- Auth System -->
+                <div class="feature-box bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-indigo-800">🔑 Authentication System</h3>
+                    <p class="text-sm text-gray-600 mt-1">Security layer</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ JWT tokens (1 day expiry)</li>
+                        <li>✅ bcrypt password hashing</li>
+                        <li>✅ IP locking per user</li>
+                        <li>✅ Token stored in localStorage</li>
+                        <li>✅ Auto-redirect protected routes</li>
+                        <li>✅ Page persistence on refresh</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Column 2: Main Applications -->
+            <div class="space-y-6">
+                <h2 class="text-xl font-bold text-gray-700 border-b-2 border-green-500 pb-2">📊 T-Cal Application</h2>
+                
+                <!-- Counter Dashboard -->
+                <div class="feature-box bg-green-50 border-l-4 border-green-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-green-800">👤 DashboardPage (Counter)</h3>
+                    <p class="text-sm text-gray-600 mt-1">Counter user dashboard</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Welcome message</li>
+                        <li>✅ Quick actions grid</li>
+                        <li>✅ Navigate to T-Cal recorder</li>
+                        <li>✅ View Reports</li>
+                        <li>✅ View Logs</li>
+                        <li>✅ Logout</li>
+                    </ul>
+                </div>
+
+                <!-- Owner Dashboard -->
+                <div class="feature-box bg-purple-50 border-l-4 border-purple-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-purple-800">👑 OwnerDashboardPage</h3>
+                    <p class="text-sm text-gray-600 mt-1">Owner user dashboard</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Organization overview</li>
+                        <li>✅ View all counters' reports</li>
+                        <li>✅ WebSocket real-time updates</li>
+                        <li>✅ Export functionality</li>
+                        <li>✅ Manage organization data</li>
+                    </ul>
+                </div>
+
+                <!-- Vehicle Info -->
+                <div class="feature-box bg-green-50 border-l-4 border-green-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-green-800">🚛 VehicleInfoPage</h3>
+                    <p class="text-sm text-gray-600 mt-1">Session initialization</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Enter vehicle number</li>
+                        <li>✅ Enter driver name</li>
+                        <li>✅ Set session context</li>
+                        <li>✅ Continue to recorder</li>
+                    </ul>
+                </div>
+
+                <!-- Timber Recorder -->
+                <div class="feature-box bg-green-50 border-l-4 border-green-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-green-800">📝 TimberRecorderPage</h3>
+                    <p class="text-sm text-gray-600 mt-1">Core T-Cal feature</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Multi-length timber entry</li>
+                        <li>✅ Auto-calculation (CFT/CBM)</li>
+                        <li>✅ Draft saving (localStorage)</li>
+                        <li>✅ Report generation</li>
+                        <li>✅ Print functionality</li>
+                        <li>✅ Offline support</li>
+                    </ul>
+                </div>
+
+                <!-- Single Length -->
+                <div class="feature-box bg-green-50 border-l-4 border-green-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-green-800">📏 SingleLengthPage</h3>
+                    <p class="text-sm text-gray-600 mt-1">Alternative recorder</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Fixed length recording</li>
+                        <li>✅ Simplified entry mode</li>
+                        <li>✅ Quick calculations</li>
+                    </ul>
+                </div>
+
+                <!-- Reports -->
+                <div class="feature-box bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-yellow-800">📊 ReportsPage</h3>
+                    <p class="text-sm text-gray-600 mt-1">Report management</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ View all reports</li>
+                        <li>✅ Filter by date</li>
+                        <li>✅ Edit drafts</li>
+                        <li>✅ Delete reports</li>
+                        <li>✅ Export functionality</li>
+                    </ul>
+                </div>
+
+                <!-- Logs -->
+                <div class="feature-box bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-yellow-800">📋 LogsPage</h3>
+                    <p class="text-sm text-gray-600 mt-1">Activity logs</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ View calculation logs</li>
+                        <li>✅ Timestamp tracking</li>
+                        <li>✅ Delete logs</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Column 3: T-Job Sheet & Admin -->
+            <div class="space-y-6">
+                <h2 class="text-xl font-bold text-gray-700 border-b-2 border-purple-500 pb-2">📋 T-Job Sheet</h2>
+                
+                <!-- Job Sheet Main -->
+                <div class="feature-box bg-purple-50 border-l-4 border-purple-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-purple-800">📋 JobSheetPage (Owner)</h3>
+                    <p class="text-sm text-gray-600 mt-1">Task management hub</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Create products</li>
+                        <li>✅ Edit products</li>
+                        <li>✅ Delete products</li>
+                        <li>✅ Assign tasks to counters</li>
+                        <li>✅ View task status</li>
+                        <li>✅ View completed reports</li>
+                    </ul>
+                    <div class="mt-3 pt-3 border-t border-purple-200">
+                        <p class="text-xs font-semibold text-purple-700">Sub-components:</p>
+                        <ul class="text-xs mt-1 space-y-1 text-gray-500">
+                            <li>• ProductList</li>
+                            <li>• CreateProductForm</li>
+                            <li>• EditProductPage</li>
+                            <li>• SelectProductPage</li>
+                            <li>• AssignTaskPage</li>
+                            <li>• CompletedTaskReport</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Job Sheet Counter -->
+                <div class="feature-box bg-green-50 border-l-4 border-green-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-green-800">✅ JobSheetCounter</h3>
+                    <p class="text-sm text-gray-600 mt-1">Counter task view</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ View assigned tasks</li>
+                        <li>✅ Start/Complete tasks</li>
+                        <li>✅ Upload PDF reports</li>
+                        <li>✅ Real-time status sync</li>
+                    </ul>
+                </div>
+
+                <h2 class="text-xl font-bold text-gray-700 border-b-2 border-red-500 pb-2 mt-8">🔧 Admin Panel</h2>
+                
+                <!-- Admin Page -->
+                <div class="feature-box bg-red-50 border-l-4 border-red-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-red-800">👨‍💼 AdminPage</h3>
+                    <p class="text-sm text-gray-600 mt-1">System administration</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ View all users</li>
+                        <li>✅ Register new users</li>
+                        <li>✅ Edit user details</li>
+                        <li>✅ Delete users</li>
+                        <li>✅ IP address locking</li>
+                        <li>✅ Online/Offline status</li>
+                        <li>✅ Last active time</li>
+                        <li>✅ Current page tracking</li>
+                    </ul>
+                    <div class="mt-3 pt-3 border-t border-red-200">
+                        <p class="text-xs font-semibold text-red-700">Activity Tracking:</p>
+                        <ul class="text-xs mt-1 space-y-1 text-gray-500">
+                            <li>📋 Timeline view (all activities)</li>
+                            <li>📊 Usage graph (daily stats)</li>
+                            <li>🗑️ Reset timeline option</li>
+                            <li>🔄 Auto-refresh (30s)</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Stats Cards -->
+                <div class="feature-box bg-red-50 border-l-4 border-red-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-red-800">📈 Admin Stats</h3>
+                    <p class="text-sm text-gray-600 mt-1">Dashboard metrics</p>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Total users count</li>
+                        <li>✅ Online users count</li>
+                        <li>✅ Offline users count</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Background Services -->
+        <div class="mt-10">
+            <h2 class="text-xl font-bold text-gray-700 border-b-2 border-indigo-500 pb-2 mb-6">⚙️ Background Services & Infrastructure</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                <div class="feature-box bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-indigo-800">💓 Heartbeat System</h3>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ 30-second intervals</li>
+                        <li>✅ Updates last_active</li>
+                        <li>✅ Tracks current page</li>
+                        <li>✅ Sets is_online = TRUE</li>
+                    </ul>
+                </div>
+
+                <div class="feature-box bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-indigo-800">📡 Offline Support</h3>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Detect online/offline</li>
+                        <li>✅ Queue activities locally</li>
+                        <li>✅ Auto-sync on reconnect</li>
+                        <li>✅ Visual indicator</li>
+                        <li>✅ Preserve timestamps</li>
+                    </ul>
+                </div>
+
+                <div class="feature-box bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-indigo-800">🔌 WebSocket</h3>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ Real-time Owner-Counter sync</li>
+                        <li>✅ Task status updates</li>
+                        <li>✅ Live notifications</li>
+                    </ul>
+                </div>
+
+                <div class="feature-box bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-indigo-800">💾 localStorage</h3>
+                    <ul class="text-xs mt-2 space-y-1 text-gray-500">
+                        <li>✅ JWT token storage</li>
+                        <li>✅ Current page persistence</li>
+                        <li>✅ Draft auto-save</li>
+                        <li>✅ Offline activity queue</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Database Schema -->
+        <div class="mt-10">
+            <h2 class="text-xl font-bold text-gray-700 border-b-2 border-gray-500 pb-2 mb-6">🗄️ Database Tables (PostgreSQL)</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                <div class="bg-white p-4 rounded-lg shadow text-sm">
+                    <h3 class="font-bold text-gray-800 mb-2">👥 users</h3>
+                    <ul class="text-xs space-y-1 text-gray-600">
+                        <li>id, name, surname, email</li>
+                        <li>password_hash, phone</li>
+                        <li>role, organization</li>
+                        <li>is_admin, allowed_ip</li>
+                        <li>last_login_ip</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow text-sm">
+                    <h3 class="font-bold text-gray-800 mb-2">📊 reports</h3>
+                    <ul class="text-xs space-y-1 text-gray-600">
+                        <li>id, user_id, name</li>
+                        <li>data (JSONB), role</li>
+                        <li>organization</li>
+                        <li>created_at</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow text-sm">
+                    <h3 class="font-bold text-gray-800 mb-2">📋 logs</h3>
+                    <ul class="text-xs space-y-1 text-gray-600">
+                        <li>id, user_id, name</li>
+                        <li>data (JSONB), role</li>
+                        <li>organization</li>
+                        <li>created_at</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow text-sm">
+                    <h3 class="font-bold text-gray-800 mb-2">📦 products</h3>
+                    <ul class="text-xs space-y-1 text-gray-600">
+                        <li>id, organization</li>
+                        <li>part_name, sizes</li>
+                        <li>wood_type, wood_usage</li>
+                        <li>created_at</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow text-sm">
+                    <h3 class="font-bold text-gray-800 mb-2">✅ tasks</h3>
+                    <ul class="text-xs space-y-1 text-gray-600">
+                        <li>id, product_id, organization</li>
+                        <li>assigned_counter_id</li>
+                        <li>contractor_name, buyer_name</li>
+                        <li>quantity, status</li>
+                        <li>pdf_path, completed_at</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow text-sm">
+                    <h3 class="font-bold text-gray-800 mb-2">📈 user_activity</h3>
+                    <ul class="text-xs space-y-1 text-gray-600">
+                        <li>id, user_id, action</li>
+                        <li>page, details (JSONB)</li>
+                        <li>ip_address, user_agent</li>
+                        <li>created_at</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow text-sm">
+                    <h3 class="font-bold text-gray-800 mb-2">🟢 user_sessions</h3>
+                    <ul class="text-xs space-y-1 text-gray-600">
+                        <li>id, user_id (UNIQUE)</li>
+                        <li>last_active</li>
+                        <li>current_page</li>
+                        <li>is_online</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow text-sm">
+                    <h3 class="font-bold text-gray-800 mb-2">🔑 password_resets</h3>
+                    <ul class="text-xs space-y-1 text-gray-600">
+                        <li>id, email, token</li>
+                        <li>expires_at</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- User Flow Diagram -->
+        <div class="mt-10">
+            <h2 class="text-xl font-bold text-gray-700 border-b-2 border-blue-500 pb-2 mb-6">🔄 User Flow Diagram</h2>
+            
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div class="flex flex-col items-center">
+                    
+                    <!-- Start -->
+                    <div class="bg-blue-500 text-white px-6 py-3 rounded-full font-bold">🌐 User Opens App</div>
+                    <div class="h-8 w-0.5 bg-gray-300"></div>
+                    
+                    <!-- Home -->
+                    <div class="bg-blue-100 border-2 border-blue-500 px-6 py-3 rounded-lg">HomePage</div>
+                    <div class="h-8 w-0.5 bg-gray-300"></div>
+                    
+                    <!-- Apps -->
+                    <div class="bg-blue-100 border-2 border-blue-500 px-6 py-3 rounded-lg">AppsListPage</div>
+                    <div class="h-8 w-0.5 bg-gray-300"></div>
+                    
+                    <!-- Decision -->
+                    <div class="bg-yellow-100 border-2 border-yellow-500 px-6 py-3 rounded-lg">🔐 Authenticated?</div>
+                    
+                    <div class="flex gap-20 mt-4">
+                        <!-- No Path -->
+                        <div class="flex flex-col items-center">
+                            <span class="text-red-600 font-bold mb-2">❌ No</span>
+                            <div class="h-8 w-0.5 bg-gray-300"></div>
+                            <div class="bg-blue-100 border-2 border-blue-500 px-6 py-3 rounded-lg">LoginPage</div>
+                            <div class="h-8 w-0.5 bg-gray-300"></div>
+                            <div class="bg-green-100 border-2 border-green-500 px-4 py-2 rounded-lg text-sm">JWT + Session Created</div>
+                        </div>
+                        
+                        <!-- Yes Path -->
+                        <div class="flex flex-col items-center">
+                            <span class="text-green-600 font-bold mb-2">✅ Yes</span>
+                            <div class="h-8 w-0.5 bg-gray-300"></div>
+                            <div class="bg-yellow-100 border-2 border-yellow-500 px-6 py-3 rounded-lg">Check Role</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Role Split -->
+                    <div class="flex gap-8 mt-8">
+                        <div class="flex flex-col items-center">
+                            <span class="text-green-700 font-bold">Counter</span>
+                            <div class="h-4 w-0.5 bg-gray-300"></div>
+                            <div class="bg-green-100 border-2 border-green-500 px-4 py-2 rounded-lg text-sm">DashboardPage</div>
+                            <div class="h-4 w-0.5 bg-gray-300"></div>
+                            <div class="flex gap-2 text-xs">
+                                <div class="bg-green-50 px-2 py-1 rounded">T-Cal</div>
+                                <div class="bg-green-50 px-2 py-1 rounded">JobSheet</div>
+                                <div class="bg-green-50 px-2 py-1 rounded">Reports</div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex flex-col items-center">
+                            <span class="text-purple-700 font-bold">Owner</span>
+                            <div class="h-4 w-0.5 bg-gray-300"></div>
+                            <div class="bg-purple-100 border-2 border-purple-500 px-4 py-2 rounded-lg text-sm">OwnerDashboard</div>
+                            <div class="h-4 w-0.5 bg-gray-300"></div>
+                            <div class="flex gap-2 text-xs">
+                                <div class="bg-purple-50 px-2 py-1 rounded">JobSheet</div>
+                                <div class="bg-purple-50 px-2 py-1 rounded">Reports</div>
+                                <div class="bg-purple-50 px-2 py-1 rounded">WebSocket</div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex flex-col items-center">
+                            <span class="text-red-700 font-bold">Admin</span>
+                            <div class="h-4 w-0.5 bg-gray-300"></div>
+                            <div class="bg-red-100 border-2 border-red-500 px-4 py-2 rounded-lg text-sm">AdminPage</div>
+                            <div class="h-4 w-0.5 bg-gray-300"></div>
+                            <div class="flex gap-2 text-xs">
+                                <div class="bg-red-50 px-2 py-1 rounded">Users</div>
+                                <div class="bg-red-50 px-2 py-1 rounded">Activity</div>
+                                <div class="bg-red-50 px-2 py-1 rounded">Timeline</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Endpoints -->
+        <div class="mt-10">
+            <h2 class="text-xl font-bold text-gray-700 border-b-2 border-green-500 pb-2 mb-6">🔗 API Endpoints Summary</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-gray-800 mb-2">🔐 Auth</h3>
+                    <ul class="text-xs space-y-1 font-mono">
+                        <li class="text-green-600">POST /api/login</li>
+                        <li class="text-green-600">POST /api/register</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-gray-800 mb-2">👥 Users</h3>
+                    <ul class="text-xs space-y-1 font-mono">
+                        <li class="text-blue-600">GET /api/users</li>
+                        <li class="text-blue-600">GET /api/users/counters</li>
+                        <li class="text-yellow-600">PUT /api/users/:id</li>
+                        <li class="text-red-600">DELETE /api/users/:id</li>
+                        <li class="text-green-600">POST /api/users/:id/lock-ip</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-gray-800 mb-2">📊 Reports & Logs</h3>
+                    <ul class="text-xs space-y-1 font-mono">
+                        <li class="text-blue-600">GET /api/reports</li>
+                        <li class="text-green-600">POST /api/reports</li>
+                        <li class="text-red-600">DELETE /api/reports/:id</li>
+                        <li class="text-blue-600">GET /api/logs</li>
+                        <li class="text-green-600">POST /api/logs</li>
+                        <li class="text-red-600">DELETE /api/logs/:id</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-gray-800 mb-2">📦 Products</h3>
+                    <ul class="text-xs space-y-1 font-mono">
+                        <li class="text-blue-600">GET /api/products</li>
+                        <li class="text-blue-600">GET /api/products/part-names</li>
+                        <li class="text-green-600">POST /api/products</li>
+                        <li class="text-yellow-600">PUT /api/products/:id</li>
+                        <li class="text-red-600">DELETE /api/products/:id</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-gray-800 mb-2">✅ Tasks</h3>
+                    <ul class="text-xs space-y-1 font-mono">
+                        <li class="text-blue-600">GET /api/tasks</li>
+                        <li class="text-blue-600">GET /api/tasks/contractors</li>
+                        <li class="text-blue-600">GET /api/tasks/buyers</li>
+                        <li class="text-green-600">POST /api/tasks</li>
+                        <li class="text-yellow-600">PUT /api/tasks/:id/complete</li>
+                        <li class="text-red-600">DELETE /api/tasks/:id</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <h3 class="font-bold text-gray-800 mb-2">📈 Activity Tracking</h3>
+                    <ul class="text-xs space-y-1 font-mono">
+                        <li class="text-green-600">POST /api/activity/heartbeat</li>
+                        <li class="text-green-600">POST /api/activity/log</li>
+                        <li class="text-green-600">POST /api/activity/offline</li>
+                        <li class="text-blue-600">GET /api/activity/users</li>
+                        <li class="text-blue-600">GET /api/activity/timeline/:userId</li>
+                        <li class="text-red-600">DELETE /api/activity/timeline/:userId</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Feature Checklist -->
+        <div class="mt-10 mb-10">
+            <h2 class="text-xl font-bold text-gray-700 border-b-2 border-yellow-500 pb-2 mb-6">✅ Feature Overlap Checklist</h2>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="p-3 text-left">Feature</th>
+                            <th class="p-3 text-center">Public</th>
+                            <th class="p-3 text-center">Counter</th>
+                            <th class="p-3 text-center">Owner</th>
+                            <th class="p-3 text-center">Admin</th>
+                            <th class="p-3 text-left">Overlap Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="border-t">
+                            <td class="p-3">View Homepage</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-green-600">✓ OK - Shared public page</td>
+                        </tr>
+                        <tr class="border-t bg-gray-50">
+                            <td class="p-3">T-Cal Recording</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-green-600">✓ OK - Counter exclusive</td>
+                        </tr>
+                        <tr class="border-t">
+                            <td class="p-3">View Own Reports</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-green-600">✓ OK - Role-filtered data</td>
+                        </tr>
+                        <tr class="border-t bg-gray-50">
+                            <td class="p-3">View All Org Reports</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-green-600">✓ OK - Owner + Admin</td>
+                        </tr>
+                        <tr class="border-t">
+                            <td class="p-3">Create Products</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-green-600">✓ OK - Owner exclusive</td>
+                        </tr>
+                        <tr class="border-t bg-gray-50">
+                            <td class="p-3">Assign Tasks</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-green-600">✓ OK - Owner exclusive</td>
+                        </tr>
+                        <tr class="border-t">
+                            <td class="p-3">Complete Tasks</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-green-600">✓ OK - Counter exclusive</td>
+                        </tr>
+                        <tr class="border-t bg-gray-50">
+                            <td class="p-3">User Management</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-green-600">✓ OK - Admin exclusive</td>
+                        </tr>
+                        <tr class="border-t">
+                            <td class="p-3">Activity Tracking</td>
+                            <td class="p-3 text-center">❌</td>
+                            <td class="p-3 text-center">📤</td>
+                            <td class="p-3 text-center">📤</td>
+                            <td class="p-3 text-center">📥</td>
+                            <td class="p-3 text-green-600">✓ OK - All send, Admin views</td>
+                        </tr>
+                        <tr class="border-t bg-gray-50">
+                            <td class="p-3">Offline Support</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-center">✅</td>
+                            <td class="p-3 text-green-600">✓ OK - Universal feature</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <div class="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <h3 class="font-bold text-green-800">✅ No Feature Overlaps Detected</h3>
+                    <p class="text-sm text-green-700 mt-2">All features are properly scoped to their respective user roles. The backend validates permissions using the <code>authenticate</code> middleware and role checks.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-gray-500 text-sm pb-8">
+            <p>Generated for TCAL Application - Draveta</p>
+            <p class="mt-1">Frontend: React + Vite + Tailwind | Backend: Express + PostgreSQL | Hosting: Vercel + Render</p>
+        </div>
+    </div>
+</body>
+</html>
