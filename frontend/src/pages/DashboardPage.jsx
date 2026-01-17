@@ -37,7 +37,7 @@ export default function DashboardPage({ setPage, handleLogout, user }) {
                 <button onClick={() => setPage('vehicleInfo')} className="p-10 sm:p-16 bg-blue-500 text-white text-2xl sm:text-3xl font-bold rounded-lg shadow-xl hover:bg-blue-600 transition-all transform hover:scale-105">
                     Multi-Length Counting
                 </button>
-                <button onClick={() => setPage('singleLength')} className="p-10 sm:p-16 bg-cyan-500 text-white text-2xl sm:text-3xl font-bold rounded-lg shadow-xl hover:bg-cyan-600 transition-all transform hover:scale-105">
+                <button onClick={() => setPage('singleLengthVehicleInfo')} className="p-10 sm:p-16 bg-cyan-500 text-white text-2xl sm:text-3xl font-bold rounded-lg shadow-xl hover:bg-cyan-600 transition-all transform hover:scale-105">
                     Single Length
                 </button>
             </div>

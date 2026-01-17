@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export default function VehicleInfoPage({ setPage, setSessionInfo }) {
+export default function VehicleInfoPage({ setPage, setSessionInfo, targetPage = 'app' }) {
     const [vehicleNumber, setVehicleNumber] = useState('');
     const [note, setNote] = useState(''); // Changed to empty string for text input
 
@@ -11,14 +11,17 @@ export default function VehicleInfoPage({ setPage, setSessionInfo }) {
         }
         // Pass the session info up to the main App component
         setSessionInfo({ vehicleNumber, note });
-        // Navigate to the main timber recorder page
-        setPage('app');
+        // Navigate to the target page (app for multi-length, singleLength for single-length)
+        setPage(targetPage);
     };
+
+    const pageTitle = targetPage === 'singleLength' ? 'Single Length Counter' : 'Multi-Length Counting';
 
     return (
         <div className="flex items-center justify-center min-h-screen bg-gray-100">
             <div className="p-8 bg-white rounded-lg shadow-xl w-full max-w-md">
-                <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">Session Information</h1>
+                <h1 className="text-2xl font-bold mb-2 text-center text-gray-800">Session Information</h1>
+                <p className="text-sm text-gray-500 text-center mb-6">{pageTitle}</p>
                 
                 <div className="space-y-6">
                     <div>

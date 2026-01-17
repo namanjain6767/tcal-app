@@ -237,7 +237,7 @@ export default function HomePage({ setPage }) {
                     <div className="credentials-grid">
                         <div className="credential-card">
                             <h3>Engineering Excellence</h3>
-                            <p>Developed by software engineers with great industrial experience</p>
+                            <p >Developed by software engineers with great industrial experience</p>
                         </div>
                         <div className="credential-card">
                             <h3>Enterprise-Grade Security</h3>

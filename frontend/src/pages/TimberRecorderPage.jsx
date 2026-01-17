@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import * as XLSXStyle from 'xlsx-js-style';
 import api from '../api';
 
 const getWebSocketURL = () => {
@@ -26,6 +27,8 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
     const [entryHistory, setEntryHistory] = useState([]);
     const [reportFileName, setReportFileName] = useState('');
     const [lastClickedKey, setLastClickedKey] = useState(null); // State for flash effect
+    const [showFormatModal, setShowFormatModal] = useState(false); // Report format selection modal
+    const [sellerName, setSellerName] = useState(''); // For seller format
     const ws = useRef(null);
 
     // --- WebSocket Connection & Data Loading ---
@@ -172,10 +175,17 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
         }
     };
 
-    const handleFinish = async () => {
+    // Show format selection modal instead of directly generating
+    const handleFinish = () => {
         if (Object.keys(recordedData).length === 0 && Object.keys(rejectedData).length === 0) {
             return alert("No data recorded to generate a report.");
         }
+        setShowFormatModal(true);
+    };
+
+    // Actually generate and save report with selected format
+    const generateReportWithFormat = async (format) => {
+        setShowFormatModal(false);
         
         const date = new Date();
         const todayStr = date.toLocaleDateString();
@@ -183,10 +193,19 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
         localStorage.setItem('lastMultiLengthReportDate', todayStr);
         localStorage.setItem('dailyMultiLengthReportCounter', counter);
         
-        generateAndDownloadXLSX(recordedData, rejectedData, reportFileName);
+        if (format === 'basic') {
+            generateBasicFormatXLSX(recordedData, rejectedData, reportFileName);
+        } else if (format === 'seller') {
+            generateSellerFormatXLSX(recordedData, rejectedData, reportFileName, sellerName);
+        }
 
         const logFileName = `${reportFileName.replace('.xlsx', '')}.txt`;
-        let logContent = `SESSION LOG: ${logFileName}\nVehicle Number: ${sessionInfo.vehicleNumber}\nNote: ${sessionInfo.note}\n=============================\n\n`;
+        let logContent = `SESSION LOG: ${logFileName}\nVehicle Number: ${sessionInfo.vehicleNumber}\nNote: ${sessionInfo.note}\n`;
+        logContent += `Format: ${format === 'seller' ? 'Seller Format' : 'Basic Format'}\n`;
+        if (format === 'seller' && sellerName) {
+            logContent += `Seller Name: ${sellerName}\n`;
+        }
+        logContent += `=============================\n\n`;
         entryHistory.forEach((entry, index) => {
             logContent += `Entry ${index + 1}: T:${entry.thickness}, L:${entry.length}, W:${entry.width}, Qty: ${entry.quantity} - ${entry.status}\n`;
         });
@@ -202,11 +221,12 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
             alert("Failed to save report or log.");
         }
         
+        setSellerName('');
         handleReset();
     };
 
-    // --- Report Generation Logic ---
-    const generateAndDownloadXLSX = (accepted, rejected, fileName) => {
+    // --- Basic Format - Original report generation ---
+    const generateBasicFormatXLSX = (accepted, rejected, fileName) => {
         const wb = XLSX.utils.book_new();
 
         const processSheetData = (data, thickness) => {
@@ -330,6 +350,160 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
         }
         
         XLSX.writeFile(wb, fileName);
+    };
+
+    // --- Seller Format - Styled report with NAME, DATE, borders ---
+    const generateSellerFormatXLSX = (accepted, rejected, fileName, name) => {
+        const wb = XLSXStyle.utils.book_new();
+        const date = new Date();
+        const dateStr = date.toLocaleDateString('en-IN');
+
+        // Border style for all cells
+        const borderStyle = {
+            top: { style: 'thin', color: { rgb: '000000' } },
+            bottom: { style: 'thin', color: { rgb: '000000' } },
+            left: { style: 'thin', color: { rgb: '000000' } },
+            right: { style: 'thin', color: { rgb: '000000' } }
+        };
+
+        // Red text style
+        const redTextStyle = { font: { color: { rgb: 'FF0000' }, bold: true }, border: borderStyle };
+        const normalStyle = { border: borderStyle };
+        const headerStyle = { font: { bold: true, color: { rgb: 'FF0000' } }, border: borderStyle };
+
+        const processSellerSheet = (data, thickness, sheetType) => {
+            // Get only widths that have data
+            const usedWidths = new Set();
+            Object.keys(data).forEach(length => {
+                Object.keys(data[length]).forEach(width => {
+                    if (data[length][width] > 0) {
+                        usedWidths.add(width);
+                    }
+                });
+            });
+            const sortedWidths = Array.from(usedWidths).sort((a, b) => parseFloat(a) - parseFloat(b));
+            const allLengths = Object.keys(data).sort((a, b) => parseFloat(a) - parseFloat(b));
+
+            // Build styled array
+            const styledData = [];
+
+            // Row 0: NAME header (red)
+            const nameRow = [{ v: 'NAME', s: headerStyle }, { v: name || '', s: normalStyle }];
+            for (let i = 2; i < sortedWidths.length + 3; i++) {
+                nameRow.push({ v: '', s: normalStyle });
+            }
+            styledData.push(nameRow);
+
+            // Row 1: DATE (red)
+            const dateRow = [{ v: 'DATE', s: headerStyle }, { v: dateStr, s: normalStyle }];
+            for (let i = 2; i < sortedWidths.length + 3; i++) {
+                dateRow.push({ v: '', s: normalStyle });
+            }
+            styledData.push(dateRow);
+
+            // Row 2: Empty row
+            const emptyRow = [];
+            for (let i = 0; i < sortedWidths.length + 3; i++) {
+                emptyRow.push({ v: '', s: normalStyle });
+            }
+            styledData.push(emptyRow);
+
+            // Row 3: ITEM CODE, ITEM NAME, SIZE headers (red) with width columns
+            const headerRow = [
+                { v: 'ITEM CODE', s: headerStyle },
+                { v: 'ITEM NAME', s: headerStyle }
+            ];
+            sortedWidths.forEach(w => {
+                headerRow.push({ v: `SIZE ${w}`, s: headerStyle });
+            });
+            headerRow.push({ v: 'TOTAL', s: headerStyle });
+            styledData.push(headerRow);
+
+            // Data rows: each length
+            allLengths.forEach(length => {
+                const row = [
+                    { v: `T${thickness}L${length}`, s: normalStyle },
+                    { v: `Timber ${thickness}x${length}`, s: normalStyle }
+                ];
+                let rowTotal = 0;
+                sortedWidths.forEach(width => {
+                    const count = data[length]?.[width] || 0;
+                    row.push({ v: count, s: normalStyle });
+                    rowTotal += count;
+                });
+                row.push({ v: rowTotal, s: normalStyle });
+                styledData.push(row);
+            });
+
+            // Totals row
+            const totalsRow = [
+                { v: 'TOTAL', s: headerStyle },
+                { v: '', s: normalStyle }
+            ];
+            let grandTotal = 0;
+            sortedWidths.forEach(width => {
+                let colTotal = 0;
+                allLengths.forEach(length => {
+                    colTotal += data[length]?.[width] || 0;
+                });
+                totalsRow.push({ v: colTotal, s: normalStyle });
+                grandTotal += colTotal;
+            });
+            totalsRow.push({ v: grandTotal, s: headerStyle });
+            styledData.push(totalsRow);
+
+            // Create worksheet
+            const ws = XLSXStyle.utils.aoa_to_sheet(styledData);
+
+            // Set column widths
+            ws['!cols'] = [
+                { wch: 15 }, // ITEM CODE
+                { wch: 20 }  // ITEM NAME
+            ];
+            sortedWidths.forEach(() => {
+                ws['!cols'].push({ wch: 10 });
+            });
+            ws['!cols'].push({ wch: 10 }); // TOTAL
+
+            return ws;
+        };
+
+        // Group accepted data by thickness
+        const acceptedGrouped = {};
+        for (const key in accepted) {
+            const [t, l, w] = key.split('-');
+            if (!acceptedGrouped[t]) acceptedGrouped[t] = {};
+            if (!acceptedGrouped[t][l]) acceptedGrouped[t][l] = {};
+            acceptedGrouped[t][l][w] = accepted[key];
+        }
+
+        for (const thickness in acceptedGrouped) {
+            XLSXStyle.utils.book_append_sheet(
+                wb, 
+                processSellerSheet(acceptedGrouped[thickness], thickness, 'Accepted'), 
+                `Thickness ${thickness}`
+            );
+        }
+
+        // Group rejected data by thickness
+        if (Object.keys(rejected).length > 0) {
+            const rejectedGrouped = {};
+            for (const key in rejected) {
+                const [t, l, w] = key.split('-');
+                if (!rejectedGrouped[t]) rejectedGrouped[t] = {};
+                if (!rejectedGrouped[t][l]) rejectedGrouped[t][l] = {};
+                rejectedGrouped[t][l][w] = rejected[key];
+            }
+            for (const thickness in rejectedGrouped) {
+                XLSXStyle.utils.book_append_sheet(
+                    wb, 
+                    processSellerSheet(rejectedGrouped[thickness], thickness, 'Rejected'), 
+                    `Rejected ${thickness}`
+                );
+            }
+        }
+
+        XLSXStyle.writeFile(wb, fileName);
     };
 
     return (
@@ -467,6 +641,48 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
                     </button>
                 </footer>
             </div>
+
+            {/* Format Selection Modal */}
+            {showFormatModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-80 shadow-xl">
+                        <h2 className="text-xl font-bold mb-4 text-center text-gray-800">Select Report Format</h2>
+                        
+                        <button
+                            onClick={() => generateReportWithFormat('basic')}
+                            className="w-full py-3 mb-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                        >
+                            Basic Format
+                        </button>
+                        
+                        <div className="border-t pt-3">
+                            <input
+                                type="text"
+                                placeholder="Enter Seller Name"
+                                value={sellerName}
+                                onChange={(e) => setSellerName(e.target.value)}
+                                className="w-full p-2 border border-gray-300 rounded-lg mb-3 focus:outline-none focus:ring-2 focus:ring-green-500"
+                            />
+                            <button
+                                onClick={() => generateReportWithFormat('seller')}
+                                className="w-full py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors"
+                            >
+                                Seller Format
+                            </button>
+                        </div>
+                        
+                        <button
+                            onClick={() => {
+                                setShowFormatModal(false);
+                                setSellerName('');
+                            }}
+                            className="w-full py-2 mt-3 bg-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-400 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

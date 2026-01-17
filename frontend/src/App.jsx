@@ -475,12 +475,13 @@ export default function App() {
             case 'login': return <LoginPage setPage={setPage} onLoginSuccess={handleLoginSuccess} redirectInfo={loginRedirect} />;
             case 'dashboard': return <DashboardPage setPage={setPage} handleLogout={handleLogout} user={user} />;
             case 'ownerDashboard': return <OwnerDashboardPage setPage={setPage} handleLogout={handleLogout} user={user} />;
-            case 'vehicleInfo': return <VehicleInfoPage setPage={setPage} setSessionInfo={setSessionInfo} handleBack={handleBackToDashboard} />;
+            case 'vehicleInfo': return <VehicleInfoPage setPage={setPage} setSessionInfo={setSessionInfo} handleBack={handleBackToDashboard} targetPage="app" />;
+            case 'singleLengthVehicleInfo': return <VehicleInfoPage setPage={setPage} setSessionInfo={setSessionInfo} handleBack={handleBackToDashboard} targetPage="singleLength" />;
             case 'app': return <TimberRecorderPage user={user} setPage={setPage} activeDraft={activeDraft} setActiveDraft={setActiveDraft} sessionInfo={sessionInfo} handleBack={handleBackToDashboard} />;
             case 'admin': return <AdminPage setPage={setPage} handleBack={handleBackToDashboard} />;
             case 'reports': return <ReportsPage setPage={setPage} setActiveDraft={setActiveDraft} handleBack={handleBackToDashboard} user={user} />;
             case 'logs': return <LogsPage setPage={setPage} handleBack={handleBackToDashboard} user={user} />;
-            case 'singleLength': return <SingleLengthPage user={user} setPage={setPage} activeDraft={activeDraft} setActiveDraft={setActiveDraft} handleBack={handleBackToDashboard} />;
+            case 'singleLength': return <SingleLengthPage user={user} setPage={setPage} activeDraft={activeDraft} setActiveDraft={setActiveDraft} handleBack={handleBackToDashboard} sessionInfo={sessionInfo} />;
             case 'jobSheet': return <JobSheetPage setPage={setPage} handleBack={handleBackToDashboard} handleLogout={handleLogout} user={user} />;
             default: return <HomePage setPage={setPage} />;
         }
