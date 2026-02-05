@@ -1,6 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import api from './api';
+import offlineSync from './utils/offlineSync';
+
+// Load debug tools in development
+if (import.meta.env.DEV) {
+    import('./utils/swDebug.js').then(() => {
+        console.log('🔧 SW Debug: Type swDebug.runTests() in console to test');
+    });
+}
 
 // Import Pages
 import LoginPage from './pages/LoginPage';
@@ -21,97 +29,25 @@ const getAuthToken = () => localStorage.getItem('token');
 // --- Helper function to get the last page from local storage ---
 const getLastPage = () => localStorage.getItem('currentPage') || 'home';
 
-// --- IndexedDB for Background Sync ---
-const DB_NAME = 'tcal-offline-db';
-const DB_VERSION = 1;
-const ACTIVITY_STORE = 'activities';
-const CONFIG_STORE = 'config';
-
-const openDatabase = () => {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            if (!db.objectStoreNames.contains(ACTIVITY_STORE)) {
-                db.createObjectStore(ACTIVITY_STORE, { keyPath: 'id', autoIncrement: true });
-            }
-            if (!db.objectStoreNames.contains(CONFIG_STORE)) {
-                db.createObjectStore(CONFIG_STORE, { keyPath: 'key' });
-            }
-        };
-    });
-};
-
-const saveActivityToIDB = async (activity) => {
-    try {
-        const db = await openDatabase();
-        return new Promise((resolve, reject) => {
-            const transaction = db.transaction(ACTIVITY_STORE, 'readwrite');
-            const store = transaction.objectStore(ACTIVITY_STORE);
-            const request = store.add(activity);
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => resolve(request.result);
-        });
-    } catch (error) {
-        console.error('IDB save error:', error);
-    }
-};
-
-const saveConfigToIDB = async (key, value) => {
-    try {
-        const db = await openDatabase();
-        return new Promise((resolve, reject) => {
-            const transaction = db.transaction(CONFIG_STORE, 'readwrite');
-            const store = transaction.objectStore(CONFIG_STORE);
-            const request = store.put({ key, value });
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => resolve();
-        });
-    } catch (error) {
-        console.error('IDB config save error:', error);
-    }
-};
-
-const clearActivitiesFromIDB = async () => {
-    try {
-        const db = await openDatabase();
-        return new Promise((resolve, reject) => {
-            const transaction = db.transaction(ACTIVITY_STORE, 'readwrite');
-            const store = transaction.objectStore(ACTIVITY_STORE);
-            const request = store.clear();
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => resolve();
-        });
-    } catch (error) {
-        console.error('IDB clear error:', error);
-    }
-};
-
-// eslint-disable-next-line no-unused-vars
-const getActivitiesFromIDB = async () => {
-    try {
-        const db = await openDatabase();
-        return new Promise((resolve, reject) => {
-            const transaction = db.transaction(ACTIVITY_STORE, 'readonly');
-            const store = transaction.objectStore(ACTIVITY_STORE);
-            const request = store.getAll();
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => resolve(request.result);
-        });
-    } catch (error) {
-        console.error('IDB get error:', error);
-        return [];
-    }
-};
-
 // --- Service Worker Registration ---
 const registerServiceWorker = async () => {
     if ('serviceWorker' in navigator) {
         try {
-            const registration = await navigator.serviceWorker.register('/sw.js');
+            // Force update the service worker
+            const registration = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
             console.log('Service Worker registered:', registration.scope);
+            
+            // Check for updates
+            registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker?.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        console.log('New Service Worker available, activating...');
+                        newWorker.postMessage({ type: 'SKIP_WAITING' });
+                    }
+                });
+            });
+            
             return registration;
         } catch (error) {
             console.error('Service Worker registration failed:', error);
@@ -119,20 +55,6 @@ const registerServiceWorker = async () => {
     }
     return null;
 };
-
-// Request background sync
-const requestBackgroundSync = async () => {
-    if ('serviceWorker' in navigator && 'SyncManager' in window) {
-        try {
-            const registration = await navigator.serviceWorker.ready;
-            await registration.sync.register('tcal-activity-sync');
-            console.log('Background sync registered');
-        } catch (error) {
-            console.error('Background sync registration failed:', error);
-        }
-    }
-};
-
 
 export default function App() {
     const [token, setToken] = useState(getAuthToken());
@@ -147,6 +69,18 @@ export default function App() {
     const previousPage = useRef(page);
     const [isOnline, setIsOnline] = useState(navigator.onLine);
     const [backgroundSyncSupported, setBackgroundSyncSupported] = useState(false);
+    const [pendingSyncCount, setPendingSyncCount] = useState(0);
+
+    // --- Update pending sync count ---
+    const updatePendingCount = useCallback(async () => {
+        try {
+            const counts = await offlineSync.getPendingCounts();
+            const total = Object.values(counts).reduce((a, b) => a + b, 0);
+            setPendingSyncCount(total);
+        } catch (error) {
+            console.error('Failed to get pending count:', error);
+        }
+    }, []);
 
     // --- Register Service Worker on mount ---
     useEffect(() => {
@@ -155,30 +89,35 @@ export default function App() {
             if (reg) {
                 setBackgroundSyncSupported('SyncManager' in window);
                 
+                // Check for periodic sync support
+                const periodicSupported = await offlineSync.isPeriodicSyncSupported();
+                console.log('Periodic Background Sync supported:', periodicSupported);
+                
                 // Listen for messages from Service Worker
-                navigator.serviceWorker.addEventListener('message', (event) => {
-                    if (event.data.type === 'SYNC_COMPLETE') {
-                        console.log(`Background sync complete: ${event.data.synced}/${event.data.total}`);
-                        // Clear local queues after successful background sync
-                        clearOfflineQueue();
-                        clearActivitiesFromIDB();
-                    }
+                offlineSync.onSyncComplete((data) => {
+                    console.log('Background sync complete:', data.results);
+                    clearOfflineQueue();
+                    updatePendingCount();
                 });
             }
+            
+            // Update pending count on mount
+            updatePendingCount();
         };
         initServiceWorker();
-    }, []);
+    }, [updatePendingCount]);
 
     // --- Save token and API URL to IndexedDB for Service Worker access ---
     useEffect(() => {
         if (token) {
-            saveConfigToIDB('token', token);
-            saveConfigToIDB('apiUrl', api.defaults.baseURL);
+            offlineSync.saveConfig('token', token);
+            offlineSync.saveConfig('apiUrl', api.defaults.baseURL);
         }
     }, [token]);
 
     // --- Offline Activity Queue Management ---
     const OFFLINE_ACTIVITY_KEY = 'offline_activity_queue';
+    // eslint-disable-next-line no-unused-vars
     const OFFLINE_HEARTBEAT_KEY = 'offline_last_heartbeat';
 
     const getOfflineQueue = () => {
@@ -202,11 +141,14 @@ export default function App() {
         localStorage.setItem(OFFLINE_ACTIVITY_KEY, JSON.stringify(queue));
         
         // Save to IndexedDB for Service Worker access
-        await saveActivityToIDB(activityData);
+        await offlineSync.saveActivity(activityData);
+        
+        // Update pending count
+        updatePendingCount();
         
         // Request background sync if supported
         if (backgroundSyncSupported) {
-            await requestBackgroundSync();
+            await offlineSync.requestBackgroundSync();
         }
         
         console.log('Activity saved offline:', activity.action || activity.type, activity.page);
@@ -251,7 +193,7 @@ export default function App() {
         }
         
         clearOfflineQueue();
-        await clearActivitiesFromIDB();
+        await offlineSync.clearStore(offlineSync.STORES.ACTIVITIES);
         console.log(`Successfully synced ${synced} offline activities`);
     }, [token]);
 
@@ -499,18 +441,26 @@ export default function App() {
     }
 
     const offlineQueueCount = getOfflineQueue().length;
+    const totalPendingCount = offlineQueueCount + pendingSyncCount;
 
     return (
         <div className="min-h-screen">
-            {/* Offline Indicator */}
-            {(!isOnline || offlineQueueCount > 0) && token && (
-                <div className={`fixed bottom-4 right-4 z-50 px-4 py-2 rounded-lg shadow-lg text-sm font-medium ${
-                    isOnline ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
+            {/* Offline/Sync Indicator */}
+            {(!isOnline || totalPendingCount > 0) && token && (
+                <div className={`fixed bottom-4 right-4 z-50 px-4 py-2 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 ${
+                    !isOnline ? 'bg-red-100 text-red-800' : 
+                    totalPendingCount > 0 ? 'bg-yellow-100 text-yellow-800' : ''
                 }`}>
                     {!isOnline ? (
-                        <span>📡 Offline Mode</span>
-                    ) : offlineQueueCount > 0 ? (
-                        <span>🔄 Syncing {offlineQueueCount} Data...</span>
+                        <>
+                            <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                            <span>📡 Offline Mode {totalPendingCount > 0 && `(${totalPendingCount} pending)`}</span>
+                        </>
+                    ) : totalPendingCount > 0 ? (
+                        <>
+                            <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+                            <span>🔄 Syncing {totalPendingCount} items...</span>
+                        </>
                     ) : null}
                 </div>
             )}

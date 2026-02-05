@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import * as XLSXStyle from 'xlsx-js-style';
 import api from '../api';
+import * as offlineSync from '../utils/offlineSync';
 
 const getWebSocketURL = () => {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
@@ -218,7 +219,28 @@ export default function TimberRecorderPage({ user, setPage, handleBack, activeDr
             await api.post('/logs', { logContent, logName: logFileName });
             alert("Report and log saved successfully!");
         } catch (error) {
-            alert("Failed to save report or log.");
+            console.error("Failed to save report or log:", error);
+            
+            // Save offline if network fails
+            if (!navigator.onLine || error.message?.includes('Network')) {
+                try {
+                    await offlineSync.saveOfflineReport({
+                        reportData: { accepted: recordedData, rejected: rejectedData, sessionInfo },
+                        fileName: reportFileName,
+                    });
+                    await offlineSync.saveOfflineLog({
+                        logContent,
+                        logName: logFileName
+                    });
+                    await offlineSync.requestBackgroundSync();
+                    alert("You're offline. Report saved locally and will sync when connected!");
+                } catch (offlineError) {
+                    console.error("Failed to save offline:", offlineError);
+                    alert("Failed to save report or log.");
+                }
+            } else {
+                alert("Failed to save report or log.");
+            }
         }
         
         setSellerName('');

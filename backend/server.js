@@ -478,6 +478,59 @@ app.delete('/api/reports/:id', authenticate, async (req, res) => {
     }
 });
 
+// --- BATCH SYNC ENDPOINT FOR OFFLINE DATA ---
+// This endpoint handles syncing multiple reports/logs from offline storage
+app.post('/api/reports/sync', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { reports = [], logs = [] } = req.body;
+    
+    const results = {
+        reports: { synced: 0, failed: 0, errors: [] },
+        logs: { synced: 0, failed: 0, errors: [] }
+    };
+    
+    // Process reports
+    for (const report of reports) {
+        try {
+            await pool.query(
+                'INSERT INTO reports (user_id, file_name, report_data, created_at) VALUES ($1, $2, $3, $4)',
+                [userId, report.fileName || 'Offline Report', report.reportData, report.timestamp || new Date()]
+            );
+            results.reports.synced++;
+        } catch (error) {
+            results.reports.failed++;
+            results.reports.errors.push({ id: report.id, error: error.message });
+            console.error("Sync Report Error:", error);
+        }
+    }
+    
+    // Process logs
+    for (const log of logs) {
+        try {
+            await pool.query(
+                'INSERT INTO logs (user_id, log_name, log_content, created_at) VALUES ($1, $2, $3, $4)',
+                [userId, log.logName || 'Offline Log', log.logContent, log.timestamp || new Date()]
+            );
+            results.logs.synced++;
+        } catch (error) {
+            results.logs.failed++;
+            results.logs.errors.push({ id: log.id, error: error.message });
+            console.error("Sync Log Error:", error);
+        }
+    }
+    
+    const totalSynced = results.reports.synced + results.logs.synced;
+    const totalFailed = results.reports.failed + results.logs.failed;
+    
+    console.log(`[Sync] User ${userId} synced ${totalSynced} items (${totalFailed} failed)`);
+    
+    res.status(200).json({
+        success: true,
+        message: `Synced ${totalSynced} items successfully`,
+        results
+    });
+});
+
 app.post('/api/logs', authenticate, async (req, res) => {
     const userId = req.user.id;
     const { logContent, logName } = req.body;
