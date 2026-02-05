@@ -77,7 +77,7 @@ export default function AppsListPage({ setPage, user, setLoginRedirect }) {
             // --- NEW: Handle T-Connect ---
             // This will open the link in a new tab.
             // PLEASE PROVIDE THE CORRECT URL.
-            const marketplaceUrl = 'https://google.com'; // <-- Placeholder URL
+            const marketplaceUrl = 'https://timbertrade.vercel.app/'; // <-- Placeholder URL
             window.open(marketplaceUrl, '_blank', 'noopener,noreferrer');
         }
     };
