@@ -164,6 +164,160 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
                 is_online BOOLEAN DEFAULT TRUE
             );
         `);
+        
+        // 9. T-Workflow Orders Table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS workflow_orders (
+                id SERIAL PRIMARY KEY,
+                organization VARCHAR(255),
+                order_number VARCHAR(20) UNIQUE NOT NULL,
+                buyer_name VARCHAR(255),
+                status VARCHAR(50) DEFAULT 'unassigned',
+                assigned_to_user_id INTEGER REFERENCES users(id),
+                created_by_user_id INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // 10. T-Workflow Items
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS workflow_items (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER REFERENCES workflow_orders(id) ON DELETE CASCADE,
+                item_name VARCHAR(255),
+                item_code VARCHAR(100),
+                size VARCHAR(100),
+                pieces INTEGER
+            );
+        `);
+
+        // 11. T-Workflow Assignments
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS workflow_assignments (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER REFERENCES workflow_orders(id) ON DELETE CASCADE,
+                order_item_id INTEGER REFERENCES workflow_items(id) ON DELETE CASCADE,
+                assign_type VARCHAR(50), 
+                assignee_name VARCHAR(255),
+                rate NUMERIC,
+                cbm NUMERIC,
+                assign_date DATE,
+                delivery_date DATE,
+                note TEXT,
+                assigned_pieces INTEGER,
+                created_by_user_id INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Migration: Add delivery_date and note columns if they don't exist
+        await pool.query(`
+            ALTER TABLE workflow_assignments 
+            ADD COLUMN IF NOT EXISTS delivery_date DATE,
+            ADD COLUMN IF NOT EXISTS note TEXT;
+        `).catch(e => console.log("Migration error (ignored):", e.message));
+
+        // 12. T-Workflow Item Master (Catalog of all items)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS workflow_item_master (
+                id SERIAL PRIMARY KEY,
+                organization VARCHAR(255) NOT NULL,
+                item_name VARCHAR(255) NOT NULL,
+                item_code VARCHAR(100),
+                size VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization, item_name, item_code, size)
+            );
+        `);
+
+        // 13. T-Workflow Suppliers
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS workflow_suppliers (
+                id SERIAL PRIMARY KEY,
+                organization VARCHAR(255),
+                name VARCHAR(255) NOT NULL,
+                phone VARCHAR(100),
+                email VARCHAR(255),
+                address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization, name)
+            );
+        `);
+
+        // 14. T-Workflow Job Managers
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS workflow_job_managers (
+                id SERIAL PRIMARY KEY,
+                organization VARCHAR(255),
+                name VARCHAR(255) NOT NULL,
+                phone VARCHAR(100),
+                email VARCHAR(255),
+                address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization, name)
+            );
+        `);
+
+        // Safe Migration: Move from assignee_name to supplier_id / job_manager_id
+        // Check if assignee_name still exists
+        const checkColumnResult = await pool.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='workflow_assignments' and column_name='assignee_name';
+        `);
+
+        if (checkColumnResult.rows.length > 0) {
+            console.log("Migrating workflow_assignments to use separate supplier/manager tables...");
+            
+            // Add new columns
+            await pool.query(`
+                ALTER TABLE workflow_assignments 
+                ADD COLUMN IF NOT EXISTS supplier_id INTEGER REFERENCES workflow_suppliers(id),
+                ADD COLUMN IF NOT EXISTS job_manager_id INTEGER REFERENCES workflow_job_managers(id);
+            `);
+
+            // Migrate unique suppliers
+            await pool.query(`
+                INSERT INTO workflow_suppliers (organization, name)
+                SELECT DISTINCT o.organization, wa.assignee_name 
+                FROM workflow_assignments wa
+                JOIN workflow_orders o ON wa.order_id = o.id
+                WHERE wa.assign_type = 'supplier' AND wa.assignee_name IS NOT NULL
+                ON CONFLICT (organization, name) DO NOTHING;
+            `);
+
+            // Migrate unique job managers
+            await pool.query(`
+                INSERT INTO workflow_job_managers (organization, name)
+                SELECT DISTINCT o.organization, wa.assignee_name 
+                FROM workflow_assignments wa
+                JOIN workflow_orders o ON wa.order_id = o.id
+                WHERE wa.assign_type = 'job_manager' AND wa.assignee_name IS NOT NULL
+                ON CONFLICT (organization, name) DO NOTHING;
+            `);
+
+            // Update workflow_assignments rows to point to new IDs
+            await pool.query(`
+                UPDATE workflow_assignments wa
+                SET supplier_id = ws.id
+                FROM workflow_suppliers ws, workflow_orders o
+                WHERE wa.order_id = o.id AND ws.organization = o.organization 
+                  AND wa.assignee_name = ws.name AND wa.assign_type = 'supplier';
+            `);
+
+            await pool.query(`
+                UPDATE workflow_assignments wa
+                SET job_manager_id = wm.id
+                FROM workflow_job_managers wm, workflow_orders o
+                WHERE wa.order_id = o.id AND wm.organization = o.organization 
+                  AND wa.assignee_name = wm.name AND wa.assign_type = 'job_manager';
+            `);
+
+            // Drop assignee_name column safely
+            await pool.query(`ALTER TABLE workflow_assignments DROP COLUMN assignee_name;`);
+            console.log("Migration complete!");
+        }
+
     } catch (err) {
         console.error("Error creating tables:", err);
     }
@@ -1028,6 +1182,474 @@ app.post('/api/activity/offline', async (req, res) => {
     }
 });
 
+// ==========================================
+//          T-WORKFLOW ENDPOINTS
+// ==========================================
+
+// Fetch unique buyers across existing workflows/tasks
+app.get('/api/workflow/buyers', authenticate, async (req, res) => {
+    const { organization } = req.user;
+    try {
+        const result = await pool.query(`
+            SELECT DISTINCT buyer_name FROM (
+                SELECT buyer_name FROM tasks WHERE organization = $1 AND buyer_name IS NOT NULL
+                UNION
+                SELECT buyer_name FROM workflow_orders WHERE organization = $1 AND buyer_name IS NOT NULL
+            ) AS combined_buyers
+        `, [organization]);
+        const names = result.rows.map(r => r.buyer_name).filter(Boolean);
+        res.status(200).json(names);
+    } catch (error) {
+        console.error("Fetch Workflow Buyers Error:", error);
+        res.status(500).send({ error: 'Failed to fetch buyers for suggestions.' });
+    }
+});
+
+// Get all orders for an organization
+app.get('/api/workflow/orders', authenticate, async (req, res) => {
+    const { organization, role, id: userId } = req.user;
+    try {
+        let query; let params;
+        if (role === 'owner') {
+             query = "SELECT o.*, u.name as assigned_to_name FROM workflow_orders o LEFT JOIN users u ON o.assigned_to_user_id = u.id WHERE o.organization = $1 ORDER BY o.created_at DESC";
+             params = [organization];
+        } else {
+             query = "SELECT o.*, u.name as assigned_to_name FROM workflow_orders o LEFT JOIN users u ON o.assigned_to_user_id = u.id WHERE o.organization = $1 AND (o.assigned_to_user_id = $2 OR o.status = 'unassigned') ORDER BY o.created_at DESC";
+             params = [organization, userId];
+        }
+        const ordersResult = await pool.query(query, params);
+        const orders = ordersResult.rows;
+
+        if (orders.length > 0) {
+            const orderIds = orders.map(o => o.id);
+            const itemsResult = await pool.query("SELECT * FROM workflow_items WHERE order_id = ANY($1::int[])", [orderIds]);
+            const assignmentsResult = await pool.query(`
+                SELECT a.*, COALESCE(ws.name, wjm.name) as assignee_name 
+                FROM workflow_assignments a 
+                LEFT JOIN workflow_suppliers ws ON a.supplier_id = ws.id 
+                LEFT JOIN workflow_job_managers wjm ON a.job_manager_id = wjm.id 
+                WHERE a.order_id = ANY($1::int[])
+            `, [orderIds]);
+            
+            orders.forEach(order => {
+                const orderItems = itemsResult.rows.filter(item => item.order_id === order.id);
+                
+                orderItems.forEach(item => {
+                    item.assignments = assignmentsResult.rows.filter(a => a.order_item_id === item.id);
+                    item.assigned_pieces = item.assignments.reduce((sum, a) => sum + parseInt(a.assigned_pieces || 0), 0);
+                });
+
+                order.items = orderItems;
+                
+                // Calculate dynamic status based on piece assignments
+                const totalPieces = orderItems.reduce((sum, item) => sum + parseInt(item.pieces || 0), 0);
+                const totalAssigned = orderItems.reduce((sum, item) => sum + item.assigned_pieces, 0);
+                
+                if (totalPieces > 0 && totalAssigned >= totalPieces) {
+                    order.status = 'assigned';
+                } else {
+                    order.status = 'unassigned';
+                }
+            });
+        }
+        
+        // Final filter in case the dynamic logic shifted it into/out of owner's view scope
+        const filteredOrders = role === 'owner' ? orders : orders.filter(o => o.status === 'unassigned' || o.assigned_to_user_id === userId);
+        res.status(200).json(filteredOrders);
+    } catch (error) {
+        console.error("Fetch Workflow Orders Error:", error);
+        res.status(500).send({ error: 'Failed to fetch workflow orders.' });
+    }
+});
+
+// Create Order
+app.post('/api/workflow/orders', authenticate, async (req, res) => {
+    const { id: userId, organization, role } = req.user;
+    const { orderNumber, buyerName, items } = req.body;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can create workflow orders.' });
+    }
+    if (!orderNumber || !items || items.length === 0) {
+        return res.status(400).send({ error: 'Order Number and at least one item are required.' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const orderResult = await client.query(
+            "INSERT INTO workflow_orders (organization, order_number, buyer_name, created_by_user_id, status) VALUES ($1, $2, $3, $4, 'unassigned') RETURNING *",
+            [organization, orderNumber, buyerName, userId]
+        );
+        const newOrder = orderResult.rows[0];
+
+        for (const item of items) {
+             await client.query(
+                "INSERT INTO workflow_items (order_id, item_name, item_code, size, pieces) VALUES ($1, $2, $3, $4, $5)",
+                [newOrder.id, item.itemName, item.itemCode || '', item.size || '', item.pieces || 0]
+             );
+             // Auto-save to master catalog (ignore if duplicate)
+             await client.query(
+                `INSERT INTO workflow_item_master (organization, item_name, item_code, size) 
+                 VALUES ($1, $2, $3, $4) 
+                 ON CONFLICT (organization, item_name, item_code, size) DO NOTHING`,
+                [organization, item.itemName, item.itemCode || '', item.size || '']
+             );
+        }
+        await client.query('COMMIT');
+        res.status(201).json(newOrder);
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Create Workflow Order Error:", error);
+        if (error.code === '23505') {
+             res.status(409).send({ error: 'An Order with this number already exists.' });
+        } else {
+             res.status(500).send({ error: 'Failed to create workflow order.' });
+        }
+    } finally {
+        client.release();
+    }
+});
+
+// Delete Order
+app.delete('/api/workflow/orders/:id', authenticate, async (req, res) => {
+    const { role, organization } = req.user;
+    const { id } = req.params;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can delete workflow orders.' });
+    }
+
+    try {
+        const result = await pool.query(
+            "DELETE FROM workflow_orders WHERE id = $1 AND organization = $2 RETURNING id",
+            [id, organization]
+        );
+        
+        if (result.rowCount === 0) {
+            return res.status(404).send({ error: 'Order not found or access denied.' });
+        }
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("Delete Workflow Order Error:", error);
+        res.status(500).send({ error: 'Failed to delete workflow order.' });
+    }
+});
+
+// Assign Pieces endpoint (Partial Assignments)
+app.post('/api/workflow/orders/:id/assign_pieces', authenticate, async (req, res) => {
+    const { id: userId, organization, role } = req.user;
+    const { id: orderId } = req.params;
+    const { assignType, assigneeId, assignDate, deliveryDate, note, assignments } = req.body;
+    
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can assign orders.' });
+    }
+
+    if (!assignType || !assigneeId || !assignments || assignments.length === 0) {
+        return res.status(400).send({ error: 'Missing required assignment fields.' });
+    }
+
+    const assigneeCol = assignType === 'supplier' ? 'supplier_id' : 'job_manager_id';
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        for (const split of assignments) {
+             if (split.pieces > 0) {
+                 await client.query(
+                    `INSERT INTO workflow_assignments 
+                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, cbm, assign_date, assigned_pieces, delivery_date, note, created_by_user_id) 
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                    [orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, split.cbm || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', userId]
+                 );
+             }
+        }
+        await client.query('COMMIT');
+        res.status(200).json({ success: true });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Assign Pieces Error:", error);
+        res.status(500).send({ error: 'Failed to assign pieces: ' + error.message });
+    } finally {
+        client.release();
+    }
+});
+
+// Bulk Assign Pieces endpoint (Assignments across multiple orders)
+app.post('/api/workflow/bulk_assign_pieces', authenticate, async (req, res) => {
+    const { id: userId, role } = req.user;
+    const { assignType, assigneeId, assignDate, deliveryDate, note, assignments } = req.body;
+    
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can assign orders.' });
+    }
+
+    if (!assignType || !assigneeId || !assignments || assignments.length === 0) {
+        return res.status(400).send({ error: 'Missing required assignment fields.' });
+    }
+
+    const assigneeCol = assignType === 'supplier' ? 'supplier_id' : 'job_manager_id';
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        for (const split of assignments) {
+             if (split.pieces > 0) {
+                 await client.query(
+                    `INSERT INTO workflow_assignments 
+                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, cbm, assign_date, assigned_pieces, delivery_date, note, created_by_user_id) 
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                    [split.orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, split.cbm || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', userId]
+                 );
+             }
+        }
+        await client.query('COMMIT');
+        res.status(200).json({ success: true });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Bulk Assign Pieces Error:", error);
+        res.status(500).send({ error: 'Failed to assign pieces: ' + error.message });
+    } finally {
+        client.release();
+    }
+});
+
+// ==========================================
+//          T-WORKFLOW SUPPLIERS ENDPOINTS
+// ==========================================
+
+app.get('/api/workflow/suppliers', authenticate, async (req, res) => {
+    const { organization } = req.user;
+    try {
+        const result = await pool.query(
+            "SELECT * FROM workflow_suppliers WHERE organization = $1 ORDER BY name ASC",
+            [organization]
+        );
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Suppliers Error:", error);
+        res.status(500).send({ error: 'Failed to fetch suppliers.' });
+    }
+});
+
+app.post('/api/workflow/suppliers', authenticate, async (req, res) => {
+    const { organization, role } = req.user;
+    const { name, phone, email, address } = req.body;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can manage suppliers.' });
+    }
+
+    if (!name) return res.status(400).send({ error: 'Supplier name is required.' });
+
+    try {
+        const result = await pool.query(
+            `INSERT INTO workflow_suppliers (organization, name, phone, email, address) 
+             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+            [organization, name, phone || null, email || null, address || null]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        if (error.code === '23505') {
+            return res.status(400).send({ error: 'Supplier already exists.' });
+        }
+        console.error("Create Supplier Error:", error);
+        res.status(500).send({ error: 'Failed to create supplier.' });
+    }
+});
+
+app.delete('/api/workflow/suppliers/:id', authenticate, async (req, res) => {
+    const { organization, role } = req.user;
+    const { id } = req.params;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can delete suppliers.' });
+    }
+
+    try {
+        await pool.query(
+            "DELETE FROM workflow_suppliers WHERE id = $1 AND organization = $2",
+            [id, organization]
+        );
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("Delete Supplier Error:", error);
+        res.status(500).send({ error: 'Failed to delete supplier.' });
+    }
+});
+
+// ==========================================
+//       T-WORKFLOW JOB MANAGERS ENDPOINTS
+// ==========================================
+
+app.get('/api/workflow/job-managers', authenticate, async (req, res) => {
+    const { organization } = req.user;
+    try {
+        const result = await pool.query(
+            "SELECT * FROM workflow_job_managers WHERE organization = $1 ORDER BY name ASC",
+            [organization]
+        );
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Job Managers Error:", error);
+        res.status(500).send({ error: 'Failed to fetch job managers.' });
+    }
+});
+
+app.post('/api/workflow/job-managers', authenticate, async (req, res) => {
+    const { organization, role } = req.user;
+    const { name, phone, email, address } = req.body;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can manage job managers.' });
+    }
+
+    if (!name) return res.status(400).send({ error: 'Job Manager name is required.' });
+
+    try {
+        const result = await pool.query(
+            `INSERT INTO workflow_job_managers (organization, name, phone, email, address) 
+             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+            [organization, name, phone || null, email || null, address || null]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        if (error.code === '23505') {
+            return res.status(400).send({ error: 'Job Manager already exists.' });
+        }
+        console.error("Create Job Manager Error:", error);
+        res.status(500).send({ error: 'Failed to create job manager.' });
+    }
+});
+
+app.delete('/api/workflow/job-managers/:id', authenticate, async (req, res) => {
+    const { organization, role } = req.user;
+    const { id } = req.params;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can delete job managers.' });
+    }
+
+    try {
+        await pool.query(
+            "DELETE FROM workflow_job_managers WHERE id = $1 AND organization = $2",
+            [id, organization]
+        );
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("Delete Job Manager Error:", error);
+        res.status(500).send({ error: 'Failed to delete job manager.' });
+    }
+});
+
+// ==========================================
+//          T-WORKFLOW ITEM MASTER ENDPOINTS
+// ==========================================
+
+// Get all master items for org
+app.get('/api/workflow/item-master', authenticate, async (req, res) => {
+    const { organization } = req.user;
+    try {
+        const result = await pool.query(
+            "SELECT * FROM workflow_item_master WHERE organization = $1 ORDER BY created_at DESC",
+            [organization]
+        );
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Item Master Error:", error);
+        res.status(500).send({ error: 'Failed to fetch items.' });
+    }
+});
+
+// Bulk create master items
+app.post('/api/workflow/item-master/bulk', authenticate, async (req, res) => {
+    const { organization, role } = req.user;
+    const { items } = req.body;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can import items.' });
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).send({ error: 'No items provided for import.' });
+    }
+
+    const client = await pool.connect();
+    let importedCount = 0;
+    try {
+        await client.query('BEGIN');
+        for (const item of items) {
+            const { itemName, itemCode, size } = item;
+            if (!itemName) continue; // Skip invalid rows
+            const result = await client.query(
+                `INSERT INTO workflow_item_master (organization, item_name, item_code, size) 
+                 VALUES ($1, $2, $3, $4) 
+                 ON CONFLICT (organization, item_name, item_code, size) DO NOTHING
+                 RETURNING id`,
+                [organization, itemName, itemCode || '', size || '']
+            );
+            if (result.rowCount > 0) importedCount++;
+        }
+        await client.query('COMMIT');
+        res.status(201).json({ success: true, count: importedCount });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Bulk Import Items Error:", error);
+        res.status(500).send({ error: 'Failed to import items.' });
+    } finally {
+        client.release();
+    }
+});
+
+// Create a new master item
+app.post('/api/workflow/item-master', authenticate, async (req, res) => {
+    const { organization, role } = req.user;
+    const { itemName, itemCode, size } = req.body;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can create items.' });
+    }
+    if (!itemName) {
+        return res.status(400).send({ error: 'Item Name is required.' });
+    }
+
+    try {
+        const result = await pool.query(
+            `INSERT INTO workflow_item_master (organization, item_name, item_code, size) 
+             VALUES ($1, $2, $3, $4) 
+             ON CONFLICT (organization, item_name, item_code, size) DO NOTHING
+             RETURNING *`,
+            [organization, itemName, itemCode || '', size || '']
+        );
+        if (result.rows.length === 0) {
+            return res.status(409).send({ error: 'This item already exists.' });
+        }
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error("Create Item Master Error:", error);
+        res.status(500).send({ error: 'Failed to create item.' });
+    }
+});
+
+// Delete a master item
+app.delete('/api/workflow/item-master/:id', authenticate, async (req, res) => {
+    const { role } = req.user;
+    const { id } = req.params;
+
+    if (role !== 'owner') {
+        return res.status(403).send({ error: 'Only owners can delete items.' });
+    }
+
+    try {
+        await pool.query("DELETE FROM workflow_item_master WHERE id = $1", [id]);
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("Delete Item Master Error:", error);
+        res.status(500).send({ error: 'Failed to delete item.' });
+    }
+});
 
 // --- Start the Server ---
 const PORT = process.env.PORT || 5000;

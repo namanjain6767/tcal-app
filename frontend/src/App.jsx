@@ -23,6 +23,7 @@ import VehicleInfoPage from './pages/VehicleInfoPage';
 import HomePage from './pages/HomePage';
 import AppsListPage from './pages/AppsListPage';
 import JobSheetPage from './pages/JobSheetPage'; // Import the new page
+import TWorkflowPage from './pages/TWorkflowPage';
 
 // --- Helper function to get the auth token from local storage ---
 const getAuthToken = () => localStorage.getItem('token');
@@ -323,9 +324,9 @@ export default function App() {
 
     // --- Save the current page to localStorage ---
     useEffect(() => {
-        // Only save "app" pages, not public ones (to avoid getting stuck on 'login')
-        const protectedPages = ['dashboard', 'ownerDashboard', 'app', 'admin', 'reports', 'logs', 'singleLength', 'jobSheet'];
-        if (protectedPages.includes(page)) {
+        // Save "app" pages and public pages, but omit 'login' to avoid getting stuck
+        const pagesToSave = ['home', 'appsList', 'dashboard', 'ownerDashboard', 'app', 'admin', 'reports', 'logs', 'singleLength', 'jobSheet', 'tWorkflow'];
+        if (pagesToSave.includes(page)) {
             localStorage.setItem('currentPage', page);
         }
     }, [page]);
@@ -364,8 +365,8 @@ export default function App() {
         } else {
             localStorage.removeItem('token');
             setUser(null);
-            // Public pages that don't require login
-            const publicPages = ['home', 'appsList', 'login']; // 'jobSheet' is now protected
+            // Public pages that don't require login (tWorkflow handles its own auth)
+            const publicPages = ['home', 'appsList', 'login', 'tWorkflow']; 
             // If on a protected page, redirect to home
             if (!publicPages.includes(page)) {
                 setPage('home');
@@ -425,6 +426,7 @@ export default function App() {
             case 'logs': return <LogsPage setPage={setPage} handleBack={handleBackToDashboard} user={user} />;
             case 'singleLength': return <SingleLengthPage user={user} setPage={setPage} activeDraft={activeDraft} setActiveDraft={setActiveDraft} handleBack={handleBackToDashboard} sessionInfo={sessionInfo} />;
             case 'jobSheet': return <JobSheetPage setPage={setPage} handleBack={handleBackToDashboard} handleLogout={handleLogout} user={user} />;
+            case 'tWorkflow': return <TWorkflowPage setPage={setPage} handleBack={handleBackToDashboard} />;
             default: return <HomePage setPage={setPage} />;
         }
     };
@@ -446,7 +448,7 @@ export default function App() {
     return (
         <div className="min-h-screen">
             {/* Offline/Sync Indicator */}
-            {(!isOnline || totalPendingCount > 0) && token && (
+            {(!isOnline || totalPendingCount > 0) && token && page !== 'tWorkflow' && (
                 <div className={`fixed bottom-4 right-4 z-50 px-4 py-2 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 ${
                     !isOnline ? 'bg-red-100 text-red-800' : 
                     totalPendingCount > 0 ? 'bg-yellow-100 text-yellow-800' : ''

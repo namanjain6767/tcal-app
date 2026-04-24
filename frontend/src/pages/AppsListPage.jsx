@@ -29,6 +29,19 @@ const MarketplaceIcon = () => (
         <polyline points="9 22 9 12 15 12 15 22"></polyline>
     </svg>
 );
+
+// --- T-Workflow Icon ---
+const WorkflowIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8 text-orange-600">
+        <circle cx="5" cy="6" r="2"></circle>
+        <circle cx="12" cy="12" r="2"></circle>
+        <circle cx="19" cy="6" r="2"></circle>
+        <circle cx="12" cy="18" r="2"></circle>
+        <path d="M6.7 7.5 10.5 10.5"></path>
+        <path d="M17.3 7.5 13.5 10.5"></path>
+        <path d="M12 14v2"></path>
+    </svg>
+);
 // --- END INLINE SVG ICONS ---
 
 // AppCard Component
@@ -79,6 +92,9 @@ export default function AppsListPage({ setPage, user, setLoginRedirect }) {
             // PLEASE PROVIDE THE CORRECT URL.
             const marketplaceUrl = 'https://timbertrade.vercel.app/'; // <-- Placeholder URL
             window.open(marketplaceUrl, '_blank', 'noopener,noreferrer');
+        } else if (appName === 'T-Workflow') {
+            // T-Workflow now manages its own completely separate authentication flow
+            setPage('tWorkflow');
         }
     };
 
@@ -88,8 +104,8 @@ export default function AppsListPage({ setPage, user, setLoginRedirect }) {
                 <h1 className="text-5xl font-bold text-center text-gray-900 mb-12">
                     Select an Application
                 </h1>
-                {/* --- UPDATED: Changed grid to 3 columns --- */}
-                <div className="grid md:grid-cols-3 gap-8">
+                {/* --- UPDATED: Changed grid to 4 columns --- */}
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
                     <AppCard 
                         title="T-CAL"
                         description="Timber calculation and inventory management."
@@ -104,13 +120,21 @@ export default function AppsListPage({ setPage, user, setLoginRedirect }) {
                         icon={<JobSheetIcon />}
                         iconBgColor="bg-teal-100"
                     />
-                    {/* --- NEW: T-Connect Card --- */}
+                    {/* --- T-Connect Card --- */}
                     <AppCard 
                         title="T-Connect"
                         description="A marketplace for timber sellers and manufacturers to connect and do business."
                         onSelect={() => handleAppSelect('T-Connect')}
                         icon={<MarketplaceIcon />}
                         iconBgColor="bg-green-100"
+                    />
+                    {/* --- NEW: T-Workflow Card --- */}
+                    <AppCard 
+                        title="T-Workflow"
+                        description="Streamline production workflows, track progress, and get real-time status updates."
+                        onSelect={() => handleAppSelect('T-Workflow')}
+                        icon={<WorkflowIcon />}
+                        iconBgColor="bg-orange-100"
                     />
                 </div>
                  <div className="mt-12 text-center">

@@ -36,4 +36,20 @@ api.interceptors.request.use(config => {
     return config;
 });
 
+// 4. Intercept 401 Unauthorized responses to automatically log out
+api.interceptors.response.use(
+    (response) => {
+        return response;
+    },
+    (error) => {
+        if (error.response && error.response.status === 401) {
+            console.error('Session expired or invalid token. Logging out...');
+            localStorage.removeItem('token');
+            localStorage.removeItem('currentPage');
+            window.location.href = '/'; // Redirect to home/login
+        }
+        return Promise.reject(error);
+    }
+);
+
 export default api;
