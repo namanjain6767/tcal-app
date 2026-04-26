@@ -94,6 +94,12 @@ export default function useWorkflowData() {
     // --- Inventory State ---
     const [inventoryList, setInventoryList] = useState([]);
     const [isFetchingInventory, setIsFetchingInventory] = useState(false);
+    const [inventoryGroupBy, setInventoryGroupBy] = useState(localStorage.getItem('tWorkflowInventoryGroup') || 'item');
+    const [expandedInventoryBuyer, setExpandedInventoryBuyer] = useState(null);
+
+    useEffect(() => {
+        localStorage.setItem('tWorkflowInventoryGroup', inventoryGroupBy);
+    }, [inventoryGroupBy]);
 
     // --- All Orders Grouped State ---
     const [expandedAllBuyerName, setExpandedAllBuyerName] = useState(null);
@@ -252,17 +258,18 @@ export default function useWorkflowData() {
             if (num < 0 || num > item.maxPieces) { setAssignError(`Cannot assign more than available pieces for ${item.itemName}`); return; }
         }
         const payload = {
-            assignType, assigneeId, assignDate, deliveryDate: assignDeliveryDate, note: assignNote, poNumber: assignPoNumber,
+            assignType, assigneeId, assignDate, deliveryDate: assignDeliveryDate, note: assignNote, 
+            poNumber: assignType === 'supplier' ? assignPoNumber : null,
+            joNumber: assignType === 'job_manager' ? assignPoNumber : null,
             assignments: assignLineItems.map(item => ({ orderItemId: item.orderItemId, pieces: parseInt(item.piecesToAssign || 0), rate: item.rate ? parseFloat(item.rate) : 0 }))
         };
         setIsSaving(true);
         try {
             await workflowApi.post(`/workflow/orders/${activeAssignOrder.id}/assign_pieces`, payload);
             const excelData = assignLineItems.map(item => ({ itemName: item.itemName, itemCode: item.itemCode, size: item.size, pieces: item.piecesToAssign, rate: item.rate }));
-            if (assignType === 'supplier') {
-                const targetSupplier = suppliersList.find(s => s.id.toString() === assigneeId.toString());
-                generateAssignmentExcel(activeAssignOrder, targetSupplier ? targetSupplier.name : 'Unknown', assignDate, excelData, assignDeliveryDate, assignNote, assignPoNumber);
-            }
+            const assigneeList = assignType === 'supplier' ? suppliersList : managersList;
+            const targetAssignee = assigneeList.find(a => a.id.toString() === assigneeId.toString());
+            generateAssignmentExcel(activeAssignOrder, targetAssignee ? targetAssignee.name : 'Unknown', assignDate, excelData, assignDeliveryDate, assignNote, assignPoNumber, assignType);
             setShowAssignModal(false);
             fetchOrders();
             fetchOptions();
@@ -311,24 +318,31 @@ export default function useWorkflowData() {
     };
 
     const handleExportExcel = (order) => {
-        let assignee = 'Multiple/Unknown', latestDate = new Date(), deliveryDate = '', note = '', poNum = '';
+        let assignee = 'Multiple/Unknown', latestDate = new Date(), deliveryDate = '', note = '', poNum = '', assignType = 'supplier';
         if (order.items && order.items.length > 0) {
-            const allAssignments = order.items.flatMap(i => i.assignments || []).filter(a => a.assign_type === 'supplier');
-            if (allAssignments.length > 0) { assignee = allAssignments[0].assignee_name || assignee; latestDate = allAssignments[0].assign_date || latestDate; deliveryDate = allAssignments[0].delivery_date || ''; note = allAssignments[0].note || ''; poNum = allAssignments[0].po_number || ''; }
+            const allAssignments = order.items.flatMap(i => i.assignments || []);
+            if (allAssignments.length > 0) { 
+                assignee = allAssignments[0].assignee_name || assignee; 
+                latestDate = allAssignments[0].assign_date || latestDate; 
+                deliveryDate = allAssignments[0].delivery_date || ''; 
+                note = allAssignments[0].note || ''; 
+                assignType = allAssignments[0].assign_type || 'supplier';
+                poNum = assignType === 'job_manager' ? (allAssignments[0].jo_number || '') : (allAssignments[0].po_number || ''); 
+            }
         }
         const excelData = order.items.map(item => {
-            const supplierAssignments = (item.assignments || []).filter(a => a.assign_type === 'supplier');
-            const pieces = supplierAssignments.reduce((sum, a) => sum + parseInt(a.assigned_pieces || 0), 0);
-            const assignment = supplierAssignments.length > 0 ? supplierAssignments[0] : {};
+            const currentAssignments = (item.assignments || []).filter(a => a.assign_type === assignType);
+            const pieces = currentAssignments.reduce((sum, a) => sum + parseInt(a.assigned_pieces || 0), 0);
+            const assignment = currentAssignments.length > 0 ? currentAssignments[0] : {};
             return { itemName: item.item_name, itemCode: item.item_code, size: item.size, pieces: pieces, rate: assignment.rate || 0 };
         });
-        generateAssignmentExcel(order, assignee, latestDate, excelData, deliveryDate, note, poNum);
+        generateAssignmentExcel(order, assignee, latestDate, excelData, deliveryDate, note, poNum, assignType);
     };
 
     const handleExportAssignmentExcel = (assignmentGroup) => {
         const order = assignmentGroup.order;
         const excelData = assignmentGroup.items.map(item => ({ itemName: item.itemName, itemCode: item.itemCode, size: item.size, pieces: item.assignedPieces, rate: item.rate }));
-        generateAssignmentExcel(order, assignmentGroup.assigneeName || 'Multiple/Unknown', assignmentGroup.assignDate || new Date(), excelData, assignmentGroup.deliveryDate || '', assignmentGroup.note || '', assignmentGroup.poNumber || '');
+        generateAssignmentExcel(order, assignmentGroup.assigneeName || 'Multiple/Unknown', assignmentGroup.assignDate || new Date(), excelData, assignmentGroup.deliveryDate || '', assignmentGroup.note || '', assignmentGroup.poNumber || '', assignmentGroup.assignType || 'supplier');
     };
 
     // ================= COMPUTED DATA =================
@@ -341,9 +355,9 @@ export default function useWorkflowData() {
             order.items?.forEach(item => {
                 item.assignments?.forEach(a => {
                     const dateStr = a.assign_date ? new Date(a.assign_date).toISOString().split('T')[0] : 'nodate';
-                    const key = `${order.id}_${a.assignee_name}_${dateStr}_${a.assign_type}_${a.po_number || ''}`;
+                    const key = `${order.id}_${a.assignee_name}_${dateStr}_${a.assign_type}_${a.po_number || a.jo_number || ''}`;
                     if (!groups[key]) {
-                        groups[key] = { id: key, order, orderNumber: order.order_number, buyerName: order.buyer_name, assigneeName: a.assignee_name, assignDate: a.assign_date, assignType: a.assign_type, deliveryDate: a.delivery_date, note: a.note, poNumber: a.po_number, createdAt: a.created_at || a.assign_date, items: [] };
+                        groups[key] = { id: key, order, orderNumber: order.order_number, buyerName: order.buyer_name, assigneeName: a.assignee_name, assignDate: a.assign_date, assignType: a.assign_type, deliveryDate: a.delivery_date, note: a.note, poNumber: a.po_number || a.jo_number, createdAt: a.created_at || a.assign_date, items: [] };
                     }
                     groups[key].items.push({ assignmentId: a.id, itemId: item.id, itemName: item.item_name, itemCode: item.item_code, size: item.size, assignedPieces: parseInt(a.assigned_pieces || 0), receivedPieces: parseInt(a.received_pieces || 0), rate: a.rate || 0 });
                 });
@@ -386,6 +400,50 @@ export default function useWorkflowData() {
         return list;
     }, [orders]);
 
+    const inventoryByBuyer = useMemo(() => {
+        const groups = {};
+        orders.forEach(order => {
+            const buyer = order.buyer_name || 'Unknown Buyer';
+            if (!groups[buyer]) {
+                groups[buyer] = { buyerName: buyer, orders: [], totalOrdered: 0, totalReceived: 0 };
+            }
+            
+            const orderData = {
+                orderId: order.id,
+                orderNumber: order.order_number,
+                items: [],
+                orderOrdered: 0,
+                orderReceived: 0
+            };
+            
+            order.items?.forEach(item => {
+                const totalOrdered = parseInt(item.pieces || 0);
+                const totalReceived = item.assignments?.reduce((sum, a) => sum + parseInt(a.received_pieces || 0), 0) || 0;
+                const remaining = Math.max(0, totalOrdered - totalReceived);
+                
+                orderData.orderOrdered += totalOrdered;
+                orderData.orderReceived += totalReceived;
+                
+                orderData.items.push({
+                    itemId: item.id,
+                    itemName: item.item_name,
+                    itemCode: item.item_code,
+                    size: item.size,
+                    ordered: totalOrdered,
+                    received: totalReceived,
+                    remaining: remaining
+                });
+            });
+            
+            if (orderData.items.length > 0) {
+                groups[buyer].totalOrdered += orderData.orderOrdered;
+                groups[buyer].totalReceived += orderData.orderReceived;
+                groups[buyer].orders.push(orderData);
+            }
+        });
+        return Object.values(groups).sort((a, b) => a.buyerName.localeCompare(b.buyerName));
+    }, [orders]);
+
     // ================= BULK ASSIGN =================
 
     const handleOpenBulkAssignModal = () => {
@@ -408,17 +466,18 @@ export default function useWorkflowData() {
         setIsSaving(true);
         try {
             const payload = {
-                assignType, assigneeId, assignDate, deliveryDate: assignDeliveryDate, note: assignNote, poNumber: assignPoNumber,
+                assignType, assigneeId, assignDate, deliveryDate: assignDeliveryDate, note: assignNote, 
+                poNumber: assignType === 'supplier' ? assignPoNumber : null,
+                joNumber: assignType === 'job_manager' ? assignPoNumber : null,
                 assignments: assignLineItems.map(item => ({ orderId: item.orderId, orderItemId: item.orderItemId, pieces: parseInt(item.piecesToAssign || 0), rate: item.rate ? parseFloat(item.rate) : 0 }))
             };
             await workflowApi.post('/workflow/bulk_assign_pieces', payload);
-            if (assignType === 'supplier') {
-                const targetSupplier = suppliersList.find(s => s.id.toString() === assigneeId.toString());
-                const orderNumbers = [...new Set(assignLineItems.map(i => i.orderNumber))].join(', ');
-                generateAssignmentExcel({ order_number: orderNumbers }, targetSupplier ? targetSupplier.name : 'Unknown', assignDate,
-                    payload.assignments.map((a, idx) => ({ itemName: assignLineItems[idx].itemName, itemCode: assignLineItems[idx].itemCode, size: assignLineItems[idx].size, pieces: a.pieces, rate: a.rate })),
-                    assignDeliveryDate, assignNote, assignPoNumber);
-            }
+            const assigneeList = assignType === 'supplier' ? suppliersList : managersList;
+            const targetAssignee = assigneeList.find(a => a.id.toString() === assigneeId.toString());
+            const orderNumbers = [...new Set(assignLineItems.map(i => i.orderNumber))].join(', ');
+            generateAssignmentExcel({ order_number: orderNumbers }, targetAssignee ? targetAssignee.name : 'Unknown', assignDate,
+                payload.assignments.map((a, idx) => ({ itemName: assignLineItems[idx].itemName, itemCode: assignLineItems[idx].itemCode, size: assignLineItems[idx].size, pieces: a.pieces, rate: a.rate })),
+                assignDeliveryDate, assignNote, assignPoNumber, assignType);
             setShowBulkAssignModal(false); setSelectedUnassignedItemIds([]); fetchOrders();
         } catch (error) { setAssignError(error.response?.data?.error || 'Failed to bulk assign pieces.'); }
         finally { setIsSaving(false); }
@@ -575,6 +634,7 @@ export default function useWorkflowData() {
         handleOpenCreateItemModal, submitCreateItem, handleDeleteItem,
         // Inward & Inventory
         inventoryList, isFetchingInventory, fetchInventory,
+        inventoryGroupBy, setInventoryGroupBy, inventoryByBuyer, expandedInventoryBuyer, setExpandedInventoryBuyer,
         showInwardModal, setShowInwardModal, activeInwardGroup, inwardDate, setInwardDate, inwardChallanNo, setInwardChallanNo,
         inwardItems, setInwardItems, inwardError, setInwardError, handleOpenInwardModal, submitInwardRecord, handleImportExcel, isImporting,
         // Directory

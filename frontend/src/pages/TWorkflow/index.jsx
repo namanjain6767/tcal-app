@@ -31,6 +31,7 @@ export default function TWorkflowPage({ setPage }) {
         handleOpenCreateItemModal, submitCreateItem, handleDeleteItem,
         // Inward & Inventory
         inventoryList, isFetchingInventory, fetchInventory,
+        inventoryGroupBy, setInventoryGroupBy, inventoryByBuyer, expandedInventoryBuyer, setExpandedInventoryBuyer,
         showInwardModal, setShowInwardModal, activeInwardGroup, inwardDate, setInwardDate, inwardChallanNo, setInwardChallanNo,
         inwardItems, setInwardItems, inwardError, setInwardError, handleOpenInwardModal, submitInwardRecord, handleImportExcel, isImporting,
         // Directory
@@ -144,7 +145,7 @@ export default function TWorkflowPage({ setPage }) {
                                                 <div className="flex justify-between items-start mb-4 pb-3 border-b border-gray-100">
                                                     <div>
                                                         <span className="font-bold text-gray-800 text-lg group-hover:text-orange-600 transition-colors">#{orderGrp.order.order_number}</span>
-                                                        <p className="text-sm font-medium text-blue-600 mt-1 mb-0.5">PO: {orderGrp.assignments[0]?.po_number || '-'}</p>
+                                                        <p className="text-sm font-medium text-blue-600 mt-1 mb-0.5">{!isSupplier ? 'JO' : 'PO'}: {orderGrp.assignments[0]?.jo_number || orderGrp.assignments[0]?.po_number || '-'}</p>
                                                         <p className="text-xs text-gray-500 mt-0.5">{orderGrp.order.buyer_name}</p>
                                                     </div>
                                                     <span className="text-xs font-bold px-2.5 py-1.5 bg-orange-50 text-orange-700 rounded-lg">{orderGrp.pieces} pcs</span>
@@ -467,11 +468,25 @@ export default function TWorkflowPage({ setPage }) {
                     <div>
                         <div className="flex justify-between items-center mb-6">
                             <h2 className="text-lg font-bold text-gray-800">Inventory Status</h2>
-                            <button onClick={fetchInventory} className="px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition text-sm">
-                                {isFetchingInventory ? 'Refreshing...' : 'Refresh'}
-                            </button>
+                            <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                                    <span>Group By:</span>
+                                    <select 
+                                        value={inventoryGroupBy} 
+                                        onChange={(e) => setInventoryGroupBy(e.target.value)}
+                                        className="px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white"
+                                    >
+                                        <option value="item">Items</option>
+                                        <option value="buyer">Buyers</option>
+                                    </select>
+                                </div>
+                                <button onClick={fetchInventory} className="px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition text-sm">
+                                    {isFetchingInventory ? 'Refreshing...' : 'Refresh'}
+                                </button>
+                            </div>
                         </div>
-                        {inventoryList.length === 0 ? (
+                        {inventoryGroupBy === 'item' ? (
+                            inventoryList.length === 0 ? (
                             <div className="text-center py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
                                 <h3 className="text-xl font-medium text-gray-600 mb-2">No inventory available</h3>
                                 <p className="text-gray-400">Receive items via Inward Record to build inventory.</p>
@@ -503,6 +518,112 @@ export default function TWorkflowPage({ setPage }) {
                                     </tbody>
                                 </table>
                             </div>
+                        )) : (
+                            inventoryByBuyer.length === 0 ? (
+                                <div className="text-center py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
+                                    <h3 className="text-xl font-medium text-gray-600 mb-2">No active orders</h3>
+                                    <p className="text-gray-400">Create orders and receive items to track inventory by buyer.</p>
+                                </div>
+                            ) : expandedInventoryBuyer ? (
+                                <div>
+                                    <button
+                                        onClick={() => setExpandedInventoryBuyer(null)}
+                                        className="flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-gray-800 mb-5 transition-colors"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg> Back to Buyers
+                                    </button>
+                                    {(() => {
+                                        const buyerGroup = inventoryByBuyer.find(b => b.buyerName === expandedInventoryBuyer);
+                                        if (!buyerGroup) return null;
+                                        return (
+                                            <div className="space-y-6">
+                                                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 flex justify-between items-center">
+                                                    <div>
+                                                        <h3 className="text-xl font-bold text-gray-900">{buyerGroup.buyerName}</h3>
+                                                        <p className="text-sm text-gray-500 mt-1">{buyerGroup.orders.length} Active Orders</p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="text-sm text-gray-500">Inventory Status</div>
+                                                        <div className="text-lg font-bold text-gray-800">
+                                                            {buyerGroup.totalReceived} <span className="text-gray-400 text-sm font-normal">/ {buyerGroup.totalOrdered} pcs rec'd</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-1 gap-6">
+                                                    {buyerGroup.orders.map(order => (
+                                                        <div key={order.orderId} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+                                                            <div className="bg-gray-50 px-5 py-4 border-b border-gray-100 flex justify-between items-center">
+                                                                <h4 className="font-semibold text-gray-800">Order #{order.orderNumber}</h4>
+                                                                <div className="text-sm font-medium text-gray-500">
+                                                                    {order.orderReceived} / {order.orderOrdered} rec'd
+                                                                </div>
+                                                            </div>
+                                                            <table className="min-w-full divide-y divide-gray-100 text-left">
+                                                                <thead className="bg-white">
+                                                                    <tr>
+                                                                        <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Item</th>
+                                                                        <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase text-center">Dimensions</th>
+                                                                        <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase text-right">Ordered</th>
+                                                                        <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase text-right">Received</th>
+                                                                        <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase text-right">Left</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-gray-50 bg-white">
+                                                                    {order.items.map(item => (
+                                                                        <tr key={item.itemId} className="hover:bg-gray-50 transition-colors">
+                                                                            <td className="px-5 py-3">
+                                                                                <div className="font-medium text-gray-800 text-sm">{item.itemName}</div>
+                                                                                <div className="text-xs text-gray-400 font-mono mt-0.5">{item.itemCode || '-'}</div>
+                                                                            </td>
+                                                                            <td className="px-5 py-3 text-sm text-gray-500 text-center">{item.size || '-'}</td>
+                                                                            <td className="px-5 py-3 text-sm text-gray-700 text-right font-medium">{item.ordered}</td>
+                                                                            <td className="px-5 py-3 text-sm text-green-600 text-right font-bold">{item.received}</td>
+                                                                            <td className="px-5 py-3 text-sm text-orange-500 text-right font-bold">{item.remaining}</td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {inventoryByBuyer.map(buyerGroup => (
+                                        <div 
+                                            key={buyerGroup.buyerName} 
+                                            onClick={() => setExpandedInventoryBuyer(buyerGroup.buyerName)}
+                                            className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 cursor-pointer hover:border-orange-400 hover:shadow-md transition-all group"
+                                        >
+                                            <div className="flex justify-between items-start mb-5">
+                                                <h3 className="text-lg font-bold text-gray-800 group-hover:text-orange-600 transition-colors">{buyerGroup.buyerName}</h3>
+                                                <div className="bg-orange-50 text-orange-600 text-xs font-bold px-2.5 py-1 rounded-md">
+                                                    {buyerGroup.orders.length} Orders
+                                                </div>
+                                            </div>
+                                            <div className="flex justify-between items-end mb-1">
+                                                <div>
+                                                    <p className="text-xs text-gray-400 mb-1 uppercase tracking-wider font-semibold">Total Ordered</p>
+                                                    <p className="text-xl font-bold text-gray-800">{buyerGroup.totalOrdered} <span className="text-sm font-medium text-gray-500">pcs</span></p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-xs text-gray-400 mb-1 uppercase tracking-wider font-semibold">Received</p>
+                                                    <p className={`text-xl font-bold ${buyerGroup.totalReceived >= buyerGroup.totalOrdered && buyerGroup.totalOrdered > 0 ? 'text-green-600' : 'text-orange-500'}`}>
+                                                        {buyerGroup.totalReceived} <span className="text-sm font-medium opacity-70">pcs</span>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="mt-5 pt-4 border-t border-gray-100 flex justify-between items-center text-sm">
+                                                <span className="text-gray-500">Pending: <span className="font-semibold text-gray-700">{Math.max(0, buyerGroup.totalOrdered - buyerGroup.totalReceived)} pcs</span></span>
+                                                <span className="text-orange-600 font-medium group-hover:underline flex items-center gap-1">View Details <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg></span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )
                         )}
                     </div>
                 ) : isLoading ? (
@@ -559,7 +680,7 @@ export default function TWorkflowPage({ setPage }) {
                                                          {targetGroup.assignType === 'supplier' ? 'SUPPLIER' : 'JOB MANAGER'}: {targetGroup.assigneeName.toUpperCase()}
                                                      </span>
                                                      <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">
-                                                         PO: {targetGroup.poNumber || '-'}
+                                                         {targetGroup.assignType === 'job_manager' ? 'JO' : 'PO'}: {targetGroup.poNumber || '-'}
                                                      </span>
                                                  </div>
                                                  <div className="text-gray-600 text-sm flex gap-3 mt-1">
@@ -658,7 +779,7 @@ export default function TWorkflowPage({ setPage }) {
                                                                  {group.assignType === 'supplier' ? 'SUPPLIER' : 'JOB MANAGER'}: {(group.assigneeName || 'Unknown').toUpperCase()}
                                                              </span>
                                                              <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">
-                                                                 PO: {group.poNumber || '-'}
+                                                                 {group.assignType === 'job_manager' ? 'JO' : 'PO'}: {group.poNumber || '-'}
                                                              </span>
                                                          </div>
                                                          <p className="text-sm text-gray-500">
@@ -767,7 +888,7 @@ export default function TWorkflowPage({ setPage }) {
                                                 <p className="text-blue-600 font-medium px-4 py-2 bg-blue-50 rounded-lg">{order.assigned_to_name}</p>
                                             )}
                                             
-                                            {(order.status === 'assigned' || order.items?.some(i => i.assigned_pieces > 0)) && order.items?.some(i => i.assignments?.some(a => a.assign_type === 'supplier')) && (
+                                            {(order.status === 'assigned' || order.items?.some(i => i.assigned_pieces > 0)) && order.items?.some(i => i.assignments?.length > 0) && (
                                                 <button 
                                                     onClick={() => handleExportExcel(order)}
                                                     className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors border border-transparent hover:border-green-100"
@@ -1064,13 +1185,19 @@ export default function TWorkflowPage({ setPage }) {
                                         <div className="flex bg-white rounded-lg border border-gray-300 overflow-hidden">
                                             <button 
                                                 className={`flex-1 py-2 text-sm font-medium transition ${assignType === 'supplier' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-                                                onClick={() => setAssignType('supplier')}
+                                                onClick={() => {
+                                                    setAssignType('supplier');
+                                                    if (assignPoNumber.startsWith('JO-')) setAssignPoNumber('OH-' + Math.floor(10000 + Math.random() * 90000).toString());
+                                                }}
                                             >
                                                 Supplier
                                             </button>
                                             <button 
                                                 className={`flex-1 py-2 text-sm font-medium border-l border-gray-300 transition ${assignType === 'job_manager' ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
-                                                onClick={() => setAssignType('job_manager')}
+                                                onClick={() => {
+                                                    setAssignType('job_manager');
+                                                    if (assignPoNumber.startsWith('OH-')) setAssignPoNumber('JO-' + Math.floor(10000 + Math.random() * 90000).toString());
+                                                }}
                                             >
                                                 Job Manager
                                             </button>
@@ -1112,7 +1239,7 @@ export default function TWorkflowPage({ setPage }) {
                                         />
                                     </div>
                                     <div className="col-span-2 sm:col-span-1">
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">PO Number</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{assignType === 'job_manager' ? 'JO Number' : 'PO Number'}</label>
                                         <input 
                                             type="text" 
                                             value={assignPoNumber}
@@ -1313,8 +1440,14 @@ export default function TWorkflowPage({ setPage }) {
                                         <select 
                                             value={assignType} 
                                             onChange={(e) => {
-                                                setAssignType(e.target.value);
+                                                const val = e.target.value;
+                                                setAssignType(val);
                                                 setAssigneeId('');
+                                                if (val === 'job_manager' && assignPoNumber.startsWith('OH-')) {
+                                                    setAssignPoNumber('JO-' + Math.floor(10000 + Math.random() * 90000).toString());
+                                                } else if (val === 'supplier' && assignPoNumber.startsWith('JO-')) {
+                                                    setAssignPoNumber('OH-' + Math.floor(10000 + Math.random() * 90000).toString());
+                                                }
                                             }}
                                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white"
                                         >
@@ -1365,7 +1498,7 @@ export default function TWorkflowPage({ setPage }) {
 
                                     {/* PO Number */}
                                     <div className="col-span-2 sm:col-span-1">
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">PO Number *</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{assignType === 'job_manager' ? 'JO Number *' : 'PO Number *'}</label>
                                         <input 
                                             type="text" 
                                             value={assignPoNumber} 

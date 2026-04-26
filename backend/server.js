@@ -205,6 +205,7 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
                 delivery_date DATE,
                 note TEXT,
                 po_number VARCHAR(100),
+                jo_number VARCHAR(100),
                 assigned_pieces INTEGER,
                 created_by_user_id INTEGER REFERENCES users(id),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -216,7 +217,8 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
             ALTER TABLE workflow_assignments 
             ADD COLUMN IF NOT EXISTS delivery_date DATE,
             ADD COLUMN IF NOT EXISTS note TEXT,
-            ADD COLUMN IF NOT EXISTS po_number VARCHAR(100);
+            ADD COLUMN IF NOT EXISTS po_number VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS jo_number VARCHAR(100);
         `).catch(e => console.log("Migration error (ignored):", e.message));
 
         // Migration: Drop cbm column
@@ -1368,7 +1370,7 @@ app.delete('/api/workflow/orders/:id', authenticate, async (req, res) => {
 app.post('/api/workflow/orders/:id/assign_pieces', authenticate, async (req, res) => {
     const { id: userId, organization, role } = req.user;
     const { id: orderId } = req.params;
-    const { assignType, assigneeId, assignDate, deliveryDate, note, poNumber, assignments } = req.body;
+    const { assignType, assigneeId, assignDate, deliveryDate, note, poNumber, joNumber, assignments } = req.body;
     
     if (role !== 'owner') {
         return res.status(403).send({ error: 'Only owners can assign orders.' });
@@ -1388,9 +1390,9 @@ app.post('/api/workflow/orders/:id/assign_pieces', authenticate, async (req, res
              if (split.pieces > 0) {
                  await client.query(
                     `INSERT INTO workflow_assignments 
-                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, assign_date, assigned_pieces, delivery_date, note, po_number, created_by_user_id) 
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-                    [orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', poNumber || null, userId]
+                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, assign_date, assigned_pieces, delivery_date, note, po_number, jo_number, created_by_user_id) 
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+                    [orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', poNumber || null, joNumber || null, userId]
                  );
              }
         }
@@ -1408,7 +1410,7 @@ app.post('/api/workflow/orders/:id/assign_pieces', authenticate, async (req, res
 // Bulk Assign Pieces endpoint (Assignments across multiple orders)
 app.post('/api/workflow/bulk_assign_pieces', authenticate, async (req, res) => {
     const { id: userId, role } = req.user;
-    const { assignType, assigneeId, assignDate, deliveryDate, note, poNumber, assignments } = req.body;
+    const { assignType, assigneeId, assignDate, deliveryDate, note, poNumber, joNumber, assignments } = req.body;
     
     if (role !== 'owner') {
         return res.status(403).send({ error: 'Only owners can assign orders.' });
@@ -1428,9 +1430,9 @@ app.post('/api/workflow/bulk_assign_pieces', authenticate, async (req, res) => {
              if (split.pieces > 0) {
                  await client.query(
                     `INSERT INTO workflow_assignments 
-                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, assign_date, assigned_pieces, delivery_date, note, po_number, created_by_user_id) 
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-                    [split.orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', poNumber || null, userId]
+                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, assign_date, assigned_pieces, delivery_date, note, po_number, jo_number, created_by_user_id) 
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+                    [split.orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', poNumber || null, joNumber || null, userId]
                  );
              }
         }

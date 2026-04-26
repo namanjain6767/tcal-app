@@ -10,7 +10,7 @@ import * as XLSX from 'xlsx-js-style';
  * @param {string} deliveryDate - Delivery date (YYYY-MM-DD)
  * @param {string} note - Global note for the assignment
  */
-export const generateAssignmentExcel = (order, assigneeName, assignDate, assignments, deliveryDate, note, poNumber) => {
+export const generateAssignmentExcel = (order, assigneeName, assignDate, assignments, deliveryDate, note, poNumber, assignType = 'supplier') => {
     // 1. Setup the workbook and worksheet
     const wb = XLSX.utils.book_new();
     
@@ -89,13 +89,13 @@ export const generateAssignmentExcel = (order, assigneeName, assignDate, assignm
     // 2. Build Data Rows
     // Title Rows
     const wsData = [
-        [{ v: "PURCHASE ORDER", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }],
+        [{ v: assignType === 'job_manager' ? "JOB ORDER" : "PURCHASE ORDER", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }, { v: "", s: titleStyle }],
         [{ v: "GST IN : 08AFFPJ4990J1Z1", s: infoStyle }, { v: "", s: infoStyle }, { v: "", s: infoStyle }, { v: "", s: infoStyle }, { v: "+91 9166635555", s: { ...infoStyle, alignment: { horizontal: "right" } } }, { v: "", s: infoStyle }, { v: "", s: infoStyle }],
         [{ v: "OSWAL HANDICRAFTS", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }],
         [{ v: "G-793, BORANDADA , JODHPUR", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }],
-        [{ v: `PO.NO : ${poNumber || '-'}`, s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: `DATE : ${new Date(assignDate).toLocaleDateString('en-GB')}`, s: { ...poStyle, alignment: { horizontal: "right" } } }, { v: "", s: poStyle }, { v: "", s: poStyle }],
+        [{ v: `${assignType === 'job_manager' ? 'JO NO' : 'PO.NO'} : ${poNumber || '-'}`, s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: `DATE : ${new Date(assignDate).toLocaleDateString('en-GB')}`, s: { ...poStyle, alignment: { horizontal: "right" } } }, { v: "", s: poStyle }, { v: "", s: poStyle }],
         [{ v: `REFERENCE NO : ${order.order_number}`, s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }],
-        [{ v: `SUPPLIER NAME : ${assigneeName}`, s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }],
+        [{ v: `${assignType === 'job_manager' ? 'CONTACT PERSON' : 'SUPPLIER NAME'} : ${assigneeName}`, s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }],
         [], // Empty row separator
         // Table Headers
         [
