@@ -23,7 +23,7 @@ import VehicleInfoPage from './pages/VehicleInfoPage';
 import HomePage from './pages/HomePage';
 import AppsListPage from './pages/AppsListPage';
 import JobSheetPage from './pages/JobSheetPage'; // Import the new page
-import TWorkflowPage from './pages/TWorkflowPage';
+import TWorkflowPage from './pages/TWorkflow';
 
 // --- Helper function to get the auth token from local storage ---
 const getAuthToken = () => localStorage.getItem('token');

@@ -187,7 +187,8 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
                 item_name VARCHAR(255),
                 item_code VARCHAR(100),
                 size VARCHAR(100),
-                pieces INTEGER
+                pieces INTEGER,
+                cbm NUMERIC
             );
         `);
 
@@ -200,10 +201,10 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
                 assign_type VARCHAR(50), 
                 assignee_name VARCHAR(255),
                 rate NUMERIC,
-                cbm NUMERIC,
                 assign_date DATE,
                 delivery_date DATE,
                 note TEXT,
+                po_number VARCHAR(100),
                 assigned_pieces INTEGER,
                 created_by_user_id INTEGER REFERENCES users(id),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -214,7 +215,19 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
         await pool.query(`
             ALTER TABLE workflow_assignments 
             ADD COLUMN IF NOT EXISTS delivery_date DATE,
-            ADD COLUMN IF NOT EXISTS note TEXT;
+            ADD COLUMN IF NOT EXISTS note TEXT,
+            ADD COLUMN IF NOT EXISTS po_number VARCHAR(100);
+        `).catch(e => console.log("Migration error (ignored):", e.message));
+
+        // Migration: Drop cbm column
+        await pool.query(`
+            ALTER TABLE workflow_assignments DROP COLUMN IF EXISTS cbm;
+        `).catch(e => console.log("Migration error (ignored):", e.message));
+
+        // Migration: Add cbm to items and master
+        await pool.query(`
+            ALTER TABLE workflow_items ADD COLUMN IF NOT EXISTS cbm NUMERIC;
+            ALTER TABLE workflow_item_master ADD COLUMN IF NOT EXISTS cbm NUMERIC;
         `).catch(e => console.log("Migration error (ignored):", e.message));
 
         // 12. T-Workflow Item Master (Catalog of all items)
@@ -225,6 +238,7 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
                 item_name VARCHAR(255) NOT NULL,
                 item_code VARCHAR(100),
                 size VARCHAR(100),
+                cbm NUMERIC,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(organization, item_name, item_code, size)
             );
@@ -255,6 +269,19 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY); // Set your API Key
                 address TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(organization, name)
+            );
+        `);
+        // 15. T-Workflow Inwards (Inventory received from assignments)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS workflow_inwards (
+                id SERIAL PRIMARY KEY,
+                organization VARCHAR(255) NOT NULL,
+                assignment_id INTEGER REFERENCES workflow_assignments(id) ON DELETE CASCADE,
+                date DATE,
+                challan_no VARCHAR(255),
+                received_pieces INTEGER DEFAULT 0,
+                created_by_user_id INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
 
@@ -1224,7 +1251,8 @@ app.get('/api/workflow/orders', authenticate, async (req, res) => {
             const orderIds = orders.map(o => o.id);
             const itemsResult = await pool.query("SELECT * FROM workflow_items WHERE order_id = ANY($1::int[])", [orderIds]);
             const assignmentsResult = await pool.query(`
-                SELECT a.*, COALESCE(ws.name, wjm.name) as assignee_name 
+                SELECT a.*, COALESCE(ws.name, wjm.name) as assignee_name,
+                COALESCE((SELECT SUM(received_pieces) FROM workflow_inwards wi WHERE wi.assignment_id = a.id), 0) as received_pieces
                 FROM workflow_assignments a 
                 LEFT JOIN workflow_suppliers ws ON a.supplier_id = ws.id 
                 LEFT JOIN workflow_job_managers wjm ON a.job_manager_id = wjm.id 
@@ -1285,15 +1313,15 @@ app.post('/api/workflow/orders', authenticate, async (req, res) => {
 
         for (const item of items) {
              await client.query(
-                "INSERT INTO workflow_items (order_id, item_name, item_code, size, pieces) VALUES ($1, $2, $3, $4, $5)",
-                [newOrder.id, item.itemName, item.itemCode || '', item.size || '', item.pieces || 0]
+                "INSERT INTO workflow_items (order_id, item_name, item_code, size, pieces, cbm) VALUES ($1, $2, $3, $4, $5, $6)",
+                [newOrder.id, item.itemName, item.itemCode || '', item.size || '', item.pieces || 0, item.cbm ? parseFloat(item.cbm) : 0]
              );
              // Auto-save to master catalog (ignore if duplicate)
              await client.query(
-                `INSERT INTO workflow_item_master (organization, item_name, item_code, size) 
-                 VALUES ($1, $2, $3, $4) 
-                 ON CONFLICT (organization, item_name, item_code, size) DO NOTHING`,
-                [organization, item.itemName, item.itemCode || '', item.size || '']
+                `INSERT INTO workflow_item_master (organization, item_name, item_code, size, cbm) 
+                 VALUES ($1, $2, $3, $4, $5) 
+                 ON CONFLICT (organization, item_name, item_code, size) DO UPDATE SET cbm = EXCLUDED.cbm`,
+                [organization, item.itemName, item.itemCode || '', item.size || '', item.cbm ? parseFloat(item.cbm) : 0]
              );
         }
         await client.query('COMMIT');
@@ -1340,7 +1368,7 @@ app.delete('/api/workflow/orders/:id', authenticate, async (req, res) => {
 app.post('/api/workflow/orders/:id/assign_pieces', authenticate, async (req, res) => {
     const { id: userId, organization, role } = req.user;
     const { id: orderId } = req.params;
-    const { assignType, assigneeId, assignDate, deliveryDate, note, assignments } = req.body;
+    const { assignType, assigneeId, assignDate, deliveryDate, note, poNumber, assignments } = req.body;
     
     if (role !== 'owner') {
         return res.status(403).send({ error: 'Only owners can assign orders.' });
@@ -1360,9 +1388,9 @@ app.post('/api/workflow/orders/:id/assign_pieces', authenticate, async (req, res
              if (split.pieces > 0) {
                  await client.query(
                     `INSERT INTO workflow_assignments 
-                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, cbm, assign_date, assigned_pieces, delivery_date, note, created_by_user_id) 
+                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, assign_date, assigned_pieces, delivery_date, note, po_number, created_by_user_id) 
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-                    [orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, split.cbm || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', userId]
+                    [orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', poNumber || null, userId]
                  );
              }
         }
@@ -1380,7 +1408,7 @@ app.post('/api/workflow/orders/:id/assign_pieces', authenticate, async (req, res
 // Bulk Assign Pieces endpoint (Assignments across multiple orders)
 app.post('/api/workflow/bulk_assign_pieces', authenticate, async (req, res) => {
     const { id: userId, role } = req.user;
-    const { assignType, assigneeId, assignDate, deliveryDate, note, assignments } = req.body;
+    const { assignType, assigneeId, assignDate, deliveryDate, note, poNumber, assignments } = req.body;
     
     if (role !== 'owner') {
         return res.status(403).send({ error: 'Only owners can assign orders.' });
@@ -1400,9 +1428,9 @@ app.post('/api/workflow/bulk_assign_pieces', authenticate, async (req, res) => {
              if (split.pieces > 0) {
                  await client.query(
                     `INSERT INTO workflow_assignments 
-                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, cbm, assign_date, assigned_pieces, delivery_date, note, created_by_user_id) 
+                    (order_id, order_item_id, assign_type, ${assigneeCol}, rate, assign_date, assigned_pieces, delivery_date, note, po_number, created_by_user_id) 
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-                    [split.orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, split.cbm || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', userId]
+                    [split.orderId, split.orderItemId, assignType, assigneeId, split.rate || 0, assignDate || new Date(), split.pieces, deliveryDate || null, note || '', poNumber || null, userId]
                  );
              }
         }
@@ -1414,6 +1442,65 @@ app.post('/api/workflow/bulk_assign_pieces', authenticate, async (req, res) => {
         res.status(500).send({ error: 'Failed to assign pieces: ' + error.message });
     } finally {
         client.release();
+    }
+});
+
+// ==========================================
+//          T-WORKFLOW INWARDS & INVENTORY
+// ==========================================
+
+app.post('/api/workflow/inwards', authenticate, async (req, res) => {
+    const { id: userId, organization } = req.user;
+    const { date, challanNo, items } = req.body;
+
+    if (!items || items.length === 0) {
+        return res.status(400).send({ error: 'Missing inward items.' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        for (const item of items) {
+            if (item.receivedPieces > 0) {
+                await client.query(
+                    `INSERT INTO workflow_inwards 
+                    (organization, assignment_id, date, challan_no, received_pieces, created_by_user_id) 
+                    VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [organization, item.assignmentId, date || new Date(), challanNo || '', item.receivedPieces, userId]
+                );
+            }
+        }
+        await client.query('COMMIT');
+        res.status(200).json({ success: true });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Inward Record Error:", error);
+        res.status(500).send({ error: 'Failed to record inward: ' + error.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.get('/api/workflow/inventory', authenticate, async (req, res) => {
+    const { organization } = req.user;
+    try {
+        const result = await pool.query(`
+            SELECT 
+                wi.item_name, 
+                wi.item_code, 
+                wi.size, 
+                SUM(winw.received_pieces) as total_pieces
+            FROM workflow_inwards winw
+            JOIN workflow_assignments wa ON winw.assignment_id = wa.id
+            JOIN workflow_items wi ON wa.order_item_id = wi.id
+            WHERE winw.organization = $1
+            GROUP BY wi.item_name, wi.item_code, wi.size
+            ORDER BY wi.item_name ASC
+        `, [organization]);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Inventory Error:", error);
+        res.status(500).send({ error: 'Failed to fetch inventory.' });
     }
 });
 
@@ -1581,14 +1668,14 @@ app.post('/api/workflow/item-master/bulk', authenticate, async (req, res) => {
     try {
         await client.query('BEGIN');
         for (const item of items) {
-            const { itemName, itemCode, size } = item;
+            const { itemName, itemCode, size, cbm } = item;
             if (!itemName) continue; // Skip invalid rows
             const result = await client.query(
-                `INSERT INTO workflow_item_master (organization, item_name, item_code, size) 
-                 VALUES ($1, $2, $3, $4) 
-                 ON CONFLICT (organization, item_name, item_code, size) DO NOTHING
+                `INSERT INTO workflow_item_master (organization, item_name, item_code, size, cbm) 
+                 VALUES ($1, $2, $3, $4, $5) 
+                 ON CONFLICT (organization, item_name, item_code, size) DO UPDATE SET cbm = EXCLUDED.cbm
                  RETURNING id`,
-                [organization, itemName, itemCode || '', size || '']
+                [organization, itemName, itemCode || '', size || '', cbm ? parseFloat(cbm) : 0]
             );
             if (result.rowCount > 0) importedCount++;
         }
@@ -1606,7 +1693,7 @@ app.post('/api/workflow/item-master/bulk', authenticate, async (req, res) => {
 // Create a new master item
 app.post('/api/workflow/item-master', authenticate, async (req, res) => {
     const { organization, role } = req.user;
-    const { itemName, itemCode, size } = req.body;
+    const { itemName, itemCode, size, cbm } = req.body;
 
     if (role !== 'owner') {
         return res.status(403).send({ error: 'Only owners can create items.' });
@@ -1617,11 +1704,11 @@ app.post('/api/workflow/item-master', authenticate, async (req, res) => {
 
     try {
         const result = await pool.query(
-            `INSERT INTO workflow_item_master (organization, item_name, item_code, size) 
-             VALUES ($1, $2, $3, $4) 
-             ON CONFLICT (organization, item_name, item_code, size) DO NOTHING
+            `INSERT INTO workflow_item_master (organization, item_name, item_code, size, cbm) 
+             VALUES ($1, $2, $3, $4, $5) 
+             ON CONFLICT (organization, item_name, item_code, size) DO UPDATE SET cbm = EXCLUDED.cbm
              RETURNING *`,
-            [organization, itemName, itemCode || '', size || '']
+            [organization, itemName, itemCode || '', size || '', cbm ? parseFloat(cbm) : 0]
         );
         if (result.rows.length === 0) {
             return res.status(409).send({ error: 'This item already exists.' });

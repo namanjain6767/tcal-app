@@ -1,737 +1,57 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import axios from 'axios';
-import { jwtDecode } from 'jwt-decode';
-import api from '../api';
-import { generateAssignmentExcel } from '../utils/excelGenerator';
-import * as XLSX from 'xlsx-js-style';
-
-const BackArrowIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="m12 19-7-7 7-7"></path>
-        <path d="M19 12H5"></path>
-    </svg>
-);
-
-const PlusIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="12" y1="5" x2="12" y2="19"></line>
-        <line x1="5" y1="12" x2="19" y2="12"></line>
-    </svg>
-);
-
-const TrashIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 6h18"></path>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-    </svg>
-);
+import React from 'react';
+import useWorkflowData from './hooks/useWorkflowData';
+import { BackArrowIcon, PlusIcon, TrashIcon } from './components/Icons';
 
 export default function TWorkflowPage({ setPage }) {
-    const [tWorkflowToken, setTWorkflowToken] = useState(localStorage.getItem('tWorkflowToken'));
-    const [loginEmail, setLoginEmail] = useState('');
-    const [loginPassword, setLoginPassword] = useState('');
-    const [loginError, setLoginError] = useState('');
-    const [isLoggingIn, setIsLoggingIn] = useState(false);
+    const w = useWorkflowData();
+    const {
+        // Auth
+        tWorkflowToken, setTWorkflowToken, loginEmail, setLoginEmail, loginPassword, setLoginPassword, loginError, isLoggingIn, handleWorkflowLogin,
+        // Core
+        activeTab, setActiveTab, orders, isLoading, isSaving,
+        // Data pools
+        buyersList, itemsMasterList, suppliersList, managersList,
+        // Create Order
+        showCreateModal, setShowCreateModal, orderNumber, setOrderNumber, buyerName, setBuyerName, createLineItems, setCreateLineItems, createError,
+        handleOpenCreateModal, handleAddCreateLineItem, handleRemoveCreateLineItem, handleItemChangeCreate, submitCreateOrder,
+        // Assign Order
+        showAssignModal, setShowAssignModal, activeAssignOrder, assignPoNumber, setAssignPoNumber, assignType, setAssignType, assigneeId, setAssigneeId, assignDate, setAssignDate,
+        assignLineItems, setAssignLineItems, assignDeliveryDate, setAssignDeliveryDate, assignNote, setAssignNote, assignError,
+        handleOpenAssignModal, submitAssignOrder,
+        // Bulk Assign
+        selectedUnassignedItemIds, setSelectedUnassignedItemIds, showBulkAssignModal, setShowBulkAssignModal,
+        handleOpenBulkAssignModal, submitBulkAssignOrder, toggleUnassignedItemSelection,
+        // Navigation
+        expandedAssignedOrderId, setExpandedAssignedOrderId, expandedAssignedGroupId, setExpandedAssignedGroupId,
+        expandedAllBuyerName, setExpandedAllBuyerName, expandedAllOrderId, setExpandedAllOrderId,
+        assignedSearchQuery, setAssignedSearchQuery,
+        // Items
+        showCreateItemModal, setShowCreateItemModal, newItemName, setNewItemName,
+        newItemCode, setNewItemCode, newItemSize, setNewItemSize, newItemCbm, setNewItemCbm, createItemError,
+        handleOpenCreateItemModal, submitCreateItem, handleDeleteItem,
+        // Inward & Inventory
+        inventoryList, isFetchingInventory, fetchInventory,
+        showInwardModal, setShowInwardModal, activeInwardGroup, inwardDate, setInwardDate, inwardChallanNo, setInwardChallanNo,
+        inwardItems, setInwardItems, inwardError, setInwardError, handleOpenInwardModal, submitInwardRecord, handleImportExcel, isImporting,
+        // Directory
+        supplierViewMode, setSupplierViewMode, managerViewMode, setManagerViewMode,
+        showCreateSupplierModal, setShowCreateSupplierModal, showCreateManagerModal, setShowCreateManagerModal,
+        newDirectoryName, setNewDirectoryName, newDirectoryPhone, setNewDirectoryPhone, newDirectoryEmail, setNewDirectoryEmail, newDirectoryAddress, setNewDirectoryAddress, directoryError,
+        handleCreateDirectory, handleDeleteDirectory,
+        // Computed
+        filteredOrders, groupedAssignments, orderGroupedAssignments, buyerGroupedOrders, unassignedItemsList,
+        // Export
+        handleDeleteOrder, handleExportExcel, handleExportAssignmentExcel,
+    } = w;
 
-    const [activeTab, setActiveTab] = useState('unassigned');
-    const [orders, setOrders] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [isSaving, setIsSaving] = useState(false);
+    const searchedOrderGroupedAssignments = assignedSearchQuery.trim() === '' ? orderGroupedAssignments : orderGroupedAssignments.filter(og => {
+        const query = assignedSearchQuery.toLowerCase();
+        if (og.orderNumber?.toLowerCase().includes(query)) return true;
+        if (og.assignments.some(a => a.poNumber?.toLowerCase().includes(query))) return true;
+        return false;
+    });
 
-    // Create a local axios instance for T-Workflow requests
-    const workflowApi = React.useMemo(() => {
-        const instance = axios.create({
-            baseURL: api.defaults.baseURL,
-        });
-        instance.interceptors.request.use(config => {
-            const token = localStorage.getItem('tWorkflowToken');
-            if (token) {
-                config.headers.Authorization = `Bearer ${token}`;
-            }
-            if (config.method === 'get') {
-                config.params = { ...config.params, _t: Date.now() };
-            }
-            return config;
-        });
-        instance.interceptors.response.use(
-            response => response,
-            error => {
-                if (error.response && error.response.status === 401) {
-                    localStorage.removeItem('tWorkflowToken');
-                    setTWorkflowToken(null);
-                }
-                return Promise.reject(error);
-            }
-        );
-        return instance;
-    }, []);
-    
-    // --- Data Pools ---
-    const [buyersList, setBuyersList] = useState([]);
-    const [itemsMasterList, setItemsMasterList] = useState([]);
-    const [suppliersList, setSuppliersList] = useState([]);
-    const [managersList, setManagersList] = useState([]);
-
-    // --- Items Tab State ---
-    const [showCreateItemModal, setShowCreateItemModal] = useState(false);
-    const [newItemName, setNewItemName] = useState('');
-    const [newItemCode, setNewItemCode] = useState('');
-    const [newItemSize, setNewItemSize] = useState('');
-    const [createItemError, setCreateItemError] = useState('');
-    
-    // --- Create Order Modal State ---
-    const [showCreateModal, setShowCreateModal] = useState(false);
-    const [orderNumber, setOrderNumber] = useState('');
-    const [buyerName, setBuyerName] = useState('');
-    const [createLineItems, setCreateLineItems] = useState([
-        { id: Date.now(), itemName: '', itemCode: '', size: '', pieces: '' }
-    ]);
-    const [createError, setCreateError] = useState('');
-
-    // --- Assign Order Modal State ---
-    const [showAssignModal, setShowAssignModal] = useState(false);
-    const [activeAssignOrder, setActiveAssignOrder] = useState(null);
-    const [assignType, setAssignType] = useState('supplier'); // 'supplier' or 'job_manager'
-    const [assigneeId, setAssigneeId] = useState('');
-    const [assignDate, setAssignDate] = useState(new Date().toISOString().split('T')[0]);
-    const [assignLineItems, setAssignLineItems] = useState([]);
-    const [assignDeliveryDate, setAssignDeliveryDate] = useState('');
-    const [assignNote, setAssignNote] = useState('');
-    const [assignError, setAssignError] = useState('');
-
-    // --- Bulk Assign State ---
-    const [selectedUnassignedItemIds, setSelectedUnassignedItemIds] = useState([]);
-    const [showBulkAssignModal, setShowBulkAssignModal] = useState(false);
-
-    // --- Assigned Orders Grouped State ---
-    const [expandedAssignedOrderId, setExpandedAssignedOrderId] = useState(null);
-    const [expandedAssignedGroupId, setExpandedAssignedGroupId] = useState(null);
-
-    // --- All Orders Grouped State ---
-    const [expandedAllBuyerName, setExpandedAllBuyerName] = useState(null);
-    const [expandedAllOrderId, setExpandedAllOrderId] = useState(null);
-
-    // --- Import Items State ---
-    const [isImporting, setIsImporting] = useState(false);
-
-    // --- Suppliers / Managers Tab State ---
-    const [supplierViewMode, setSupplierViewMode] = useState('workloads'); // 'workloads' or 'directory'
-    const [managerViewMode, setManagerViewMode] = useState('workloads'); // 'workloads' or 'directory'
-    
-    // Directory Modals
-    const [showCreateSupplierModal, setShowCreateSupplierModal] = useState(false);
-    const [showCreateManagerModal, setShowCreateManagerModal] = useState(false);
-    
-    const [newDirectoryName, setNewDirectoryName] = useState('');
-    const [newDirectoryPhone, setNewDirectoryPhone] = useState('');
-    const [newDirectoryEmail, setNewDirectoryEmail] = useState('');
-    const [newDirectoryAddress, setNewDirectoryAddress] = useState('');
-    const [directoryError, setDirectoryError] = useState('');
-
-    useEffect(() => {
-        if (tWorkflowToken) {
-            fetchOrders();
-            fetchOptions();
-            fetchItemsMaster();
-        }
-    }, [tWorkflowToken]);
-
-    const fetchOrders = async () => {
-        setIsLoading(true);
-        try {
-            const res = await workflowApi.get('/workflow/orders');
-            setOrders(res.data);
-        } catch (error) {
-            console.error("Error fetching orders:", error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const fetchOptions = async () => {
-        try {
-            const [buyersRes, suppliersRes, managersRes] = await Promise.all([
-                workflowApi.get('/workflow/buyers'),
-                workflowApi.get('/workflow/suppliers'),
-                workflowApi.get('/workflow/job-managers')
-            ]);
-            setBuyersList(buyersRes.data);
-            setSuppliersList(suppliersRes.data || []);
-            setManagersList(managersRes.data || []);
-        } catch (error) {
-            console.error("Error loading dropdown options", error);
-        }
-    };
-
-    const fetchItemsMaster = async () => {
-        try {
-            const res = await workflowApi.get('/workflow/item-master');
-            setItemsMasterList(res.data);
-        } catch (error) {
-            console.error("Error fetching items master:", error);
-        }
-    };
-
-    // ================= CREATE ORDER =================
-
-    const handleOpenCreateModal = () => {
-        setOrderNumber(Math.floor(1000 + Math.random() * 9000).toString());
-        setBuyerName('');
-        setCreateLineItems([{ id: Date.now(), itemName: '', itemCode: '', size: '', pieces: '' }]);
-        setCreateError('');
-        setShowCreateModal(true);
-    };
-
-    const handleAddCreateLineItem = () => {
-        setCreateLineItems([...createLineItems, { id: Date.now(), itemName: '', itemCode: '', size: '', pieces: '' }]);
-    };
-
-    const handleRemoveCreateLineItem = (id) => {
-        if (createLineItems.length === 1) return;
-        setCreateLineItems(createLineItems.filter(item => item.id !== id));
-    };
-
-    const handleItemChangeCreate = (id, newItemName) => {
-        const matched = itemsMasterList.find(p => p.item_name === newItemName);
-        const autoCode = matched ? matched.item_code : '';
-        const autoSize = matched ? matched.size : '';
-        setCreateLineItems(createLineItems.map(item => 
-            item.id === id ? { ...item, itemName: newItemName, itemCode: autoCode, size: autoSize } : item
-        ));
-    };
-
-    const submitCreateOrder = async (e) => {
-        e.preventDefault();
-        setCreateError('');
-        
-        if (!orderNumber || !buyerName) {
-            setCreateError('Order Number and Buyer Name are required.');
-            return;
-        }
-
-        const validItems = createLineItems.filter(item => item.itemName && item.pieces > 0);
-        if (validItems.length === 0) {
-            setCreateError('Please add at least one valid item with pieces > 0.');
-            return;
-        }
-
-        setIsSaving(true);
-        try {
-            await workflowApi.post('/workflow/orders', {
-                orderNumber,
-                buyerName,
-                items: validItems
-            });
-            setShowCreateModal(false);
-            setActiveTab('unassigned');
-            fetchOrders();
-            fetchItemsMaster(); // Refresh items catalog since new items may have been added
-        } catch (error) {
-            setCreateError(error.response?.data?.error || 'Failed to create order.');
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    // ================= ASSIGN ORDER =================
-
-    const handleOpenAssignModal = (order) => {
-        setActiveAssignOrder(order);
-        setAssignType('supplier');
-        setAssigneeId('');
-        setAssignDate(new Date().toISOString().split('T')[0]);
-        setAssignDeliveryDate('');
-        setAssignNote('');
-        setAssignError('');
-        
-        // Map line items to prepopulate assignment pieces correctly mapping max available
-        const assignmentDrafts = order.items.map(i => {
-            const availableCount = Math.max(0, parseInt(i.pieces) - parseInt(i.assigned_pieces || 0));
-            return {
-                 orderItemId: i.id,
-                 itemName: i.item_name,
-                 itemCode: i.item_code,
-                 size: i.size,
-                 maxPieces: availableCount,
-                 piecesToAssign: availableCount > 0 ? '' : 0, // leave blank unless 0
-                 rate: '',
-                 cbm: ''
-            }
-        });
-        setAssignLineItems(assignmentDrafts);
-        setShowAssignModal(true);
-    };
-
-    const submitAssignOrder = async (e) => {
-        e.preventDefault();
-        setAssignError('');
-
-        if (!assigneeId) {
-            setAssignError(`Please specify the ${assignType === 'supplier' ? 'Supplier' : 'Job Manager'}.`);
-            return;
-        }
-
-        // Validate splits
-        const hasAnyAssigned = assignLineItems.some(i => parseInt(i.piecesToAssign || 0) > 0);
-        if (!hasAnyAssigned) {
-             setAssignError('You must assign at least 1 piece for one of the items.');
-             return;
-        }
-        
-        for (const item of assignLineItems) {
-            const num = parseInt(item.piecesToAssign || 0);
-            if (num < 0 || num > item.maxPieces) {
-                setAssignError(`Cannot assign more than available pieces for ${item.itemName}`);
-                return;
-            }
-        }
-
-        const payload = {
-            assignType,
-            assigneeId,
-            assignDate,
-            deliveryDate: assignDeliveryDate,
-            note: assignNote,
-            assignments: assignLineItems.map(item => ({
-                 orderItemId: item.orderItemId,
-                 pieces: parseInt(item.piecesToAssign || 0),
-                 rate: item.rate ? parseFloat(item.rate) : 0,
-                 cbm: item.cbm ? parseFloat(item.cbm) : 0
-            }))
-        };
-
-        setIsSaving(true);
-        try {
-            await workflowApi.post(`/workflow/orders/${activeAssignOrder.id}/assign_pieces`, payload);
-            
-            // Format data for Excel generator
-            const excelData = assignLineItems.map(item => ({
-                itemName: item.itemName,
-                itemCode: item.itemCode,
-                size: item.size,
-                pieces: item.piecesToAssign,
-                rate: item.rate,
-                cbm: item.cbm
-            }));
-            
-            // Generate Excel immediately only if assigning to a supplier
-            if (assignType === 'supplier') {
-                const targetSupplier = suppliersList.find(s => s.id.toString() === assigneeId.toString());
-                const targetName = targetSupplier ? targetSupplier.name : 'Unknown';
-                generateAssignmentExcel(activeAssignOrder, targetName, assignDate, excelData, assignDeliveryDate, assignNote);
-            }
-
-            setShowAssignModal(false);
-            fetchOrders(); // Updates UI and recalculates unassigned vs assigned status
-            fetchOptions(); // Refresh assignee dropdown
-        } catch (error) {
-            setAssignError(error.response?.data?.error || 'Failed to assign pieces.');
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    // ================= IMPORT EXCEL =================
-    const handleImportExcel = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        setIsImporting(true);
-        try {
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-                try {
-                    const data = new Uint8Array(event.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    
-                    const firstSheetName = workbook.SheetNames[0];
-                    const worksheet = workbook.Sheets[firstSheetName];
-                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
-                    const itemsToImport = jsonData.map(row => {
-                        const getVal = (possibleKeys) => {
-                             for (const key of Object.keys(row)) {
-                                 if (possibleKeys.includes(key.trim().toLowerCase())) {
-                                     return row[key];
-                                 }
-                             }
-                             return '';
-                        };
-                        
-                        return {
-                            itemName: getVal(['item name', 'itemname', 'item_name']),
-                            itemCode: getVal(['item code', 'itemcode', 'item_code']),
-                            size: getVal(['dimensions', 'dimension', 'size'])
-                        };
-                    }).filter(i => i.itemName);
-
-                    if (itemsToImport.length === 0) {
-                        alert("No valid items found. Ensure headers are exactly: 'Item Name', 'Item Code', 'Dimensions'");
-                        return;
-                    }
-
-                    const response = await workflowApi.post('/workflow/item-master/bulk', { items: itemsToImport });
-                    alert(`Successfully imported ${response.data.count} new items!`);
-                    fetchItemsMaster();
-                } catch (error) {
-                    console.error("Parse Excel Error:", error);
-                    alert("Failed to parse the Excel file.");
-                } finally {
-                    setIsImporting(false);
-                    e.target.value = null; // reset input
-                }
-            };
-            reader.readAsArrayBuffer(file);
-        } catch (error) {
-            console.error("Import Excel Error:", error);
-            setIsImporting(false);
-        }
-    };
-
-    const handleDeleteOrder = async (orderId, orderNumber) => {
-        if (!window.confirm(`Are you sure you want to permanently delete Order #${orderNumber}? This will also delete all its items and assignments.`)) return;
-        try {
-            await workflowApi.delete(`/workflow/orders/${orderId}`);
-            fetchOrders();
-        } catch (error) {
-            console.error('Delete order error:', error);
-            alert(error.response?.data?.error || 'Failed to delete order.');
-        }
-    };
-
-    const handleExportExcel = (order) => {
-        let assignee = 'Multiple/Unknown';
-        let latestDate = new Date();
-        let deliveryDate = '';
-        let note = '';
-        
-        if (order.items && order.items.length > 0) {
-            // Filter to only look at supplier assignments
-            const allAssignments = order.items.flatMap(i => i.assignments || []).filter(a => a.assign_type === 'supplier');
-            if (allAssignments.length > 0) {
-                assignee = allAssignments[0].assignee_name || assignee;
-                latestDate = allAssignments[0].assign_date || latestDate;
-                deliveryDate = allAssignments[0].delivery_date || '';
-                note = allAssignments[0].note || '';
-            }
-        }
-
-        const excelData = order.items.map(item => {
-            // Filter assignments for this item to only supplier
-            const supplierAssignments = (item.assignments || []).filter(a => a.assign_type === 'supplier');
-            const pieces = supplierAssignments.reduce((sum, a) => sum + parseInt(a.assigned_pieces || 0), 0);
-            const assignment = supplierAssignments.length > 0 ? supplierAssignments[0] : {};
-            
-            return {
-                itemName: item.item_name,
-                itemCode: item.item_code,
-                size: item.size,
-                pieces: pieces,
-                rate: assignment.rate || 0,
-                cbm: assignment.cbm || 0
-            };
-        });
-
-        generateAssignmentExcel(order, assignee, latestDate, excelData, deliveryDate, note);
-    };
-
-
-    const filteredOrders = orders.filter(o => 
-        activeTab === 'all' ? true : o.status === activeTab
-    );
-
-    const groupedAssignments = useMemo(() => {
-        const groups = {};
-        orders.forEach(order => {
-            order.items?.forEach(item => {
-                item.assignments?.forEach(a => {
-                    const dateStr = a.assign_date ? new Date(a.assign_date).toISOString().split('T')[0] : 'nodate';
-                    const key = `${order.id}_${a.assignee_name}_${dateStr}_${a.assign_type}`;
-                    
-                    if (!groups[key]) {
-                        groups[key] = {
-                            id: key,
-                            order: order,
-                            orderNumber: order.order_number,
-                            buyerName: order.buyer_name,
-                            assigneeName: a.assignee_name,
-                            assignDate: a.assign_date,
-                            assignType: a.assign_type,
-                            deliveryDate: a.delivery_date,
-                            note: a.note,
-                            createdAt: a.created_at || a.assign_date,
-                            items: []
-                        };
-                    }
-                    
-                    groups[key].items.push({
-                        itemId: item.id,
-                        itemName: item.item_name,
-                        itemCode: item.item_code,
-                        size: item.size,
-                        assignedPieces: parseInt(a.assigned_pieces || 0),
-                        rate: a.rate || 0,
-                        cbm: a.cbm || 0
-                    });
-                });
-            });
-        });
-        
-        return Object.values(groups).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    }, [orders]);
-
-    // Group assignments by order number for the Assigned tab
-    const orderGroupedAssignments = useMemo(() => {
-        const orderMap = {};
-        groupedAssignments.forEach(group => {
-            const orderKey = group.order.id;
-            if (!orderMap[orderKey]) {
-                orderMap[orderKey] = {
-                    orderId: group.order.id,
-                    orderNumber: group.orderNumber,
-                    buyerName: group.buyerName,
-                    createdAt: group.order.created_at,
-                    assignments: []
-                };
-            }
-            orderMap[orderKey].assignments.push(group);
-        });
-        return Object.values(orderMap).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    }, [groupedAssignments]);
-
-    const buyerGroupedOrders = useMemo(() => {
-        const groups = {};
-        filteredOrders.forEach(order => {
-            const buyer = order.buyer_name || 'Unknown Buyer';
-            if (!groups[buyer]) {
-                groups[buyer] = {
-                    buyerName: buyer,
-                    orders: [],
-                    totalPieces: 0,
-                    assignedPieces: 0
-                };
-            }
-            groups[buyer].orders.push(order);
-            
-            order.items?.forEach(item => {
-                groups[buyer].totalPieces += (item.pieces || 0);
-                groups[buyer].assignedPieces += (item.assigned_pieces || 0);
-            });
-        });
-        
-        return Object.values(groups).sort((a, b) => a.buyerName.localeCompare(b.buyerName));
-    }, [filteredOrders]);
-
-    const handleExportAssignmentExcel = (assignmentGroup) => {
-        const order = assignmentGroup.order;
-        const assignee = assignmentGroup.assigneeName || 'Multiple/Unknown';
-        const assignDate = assignmentGroup.assignDate || new Date();
-        const deliveryDate = assignmentGroup.deliveryDate || '';
-        const note = assignmentGroup.note || '';
-        
-        const excelData = assignmentGroup.items.map(item => ({
-            itemName: item.itemName,
-            itemCode: item.itemCode,
-            size: item.size,
-            pieces: item.assignedPieces,
-            rate: item.rate,
-            cbm: item.cbm
-        }));
-
-        generateAssignmentExcel(order, assignee, assignDate, excelData, deliveryDate, note);
-    };
-
-    const unassignedItemsList = useMemo(() => {
-        const list = [];
-        orders.forEach(order => {
-            order.items?.forEach(item => {
-                const assigned = parseInt(item.assigned_pieces || 0);
-                const total = parseInt(item.pieces || 0);
-                const remaining = total - assigned;
-                if (remaining > 0) {
-                    list.push({
-                        id: `${order.id}_${item.id}`,
-                        orderId: order.id,
-                        orderNumber: order.order_number,
-                        buyerName: order.buyer_name,
-                        itemId: item.id,
-                        itemName: item.item_name,
-                        itemCode: item.item_code,
-                        size: item.size,
-                        totalPieces: total,
-                        assignedPieces: assigned,
-                        remainingPieces: remaining
-                    });
-                }
-            });
-        });
-        return list;
-    }, [orders]);
-
-    const handleOpenBulkAssignModal = () => {
-        setAssignType('supplier');
-        setAssigneeId('');
-        setAssignDate(new Date().toISOString().split('T')[0]);
-        setAssignDeliveryDate('');
-        setAssignNote('');
-        setAssignError('');
-        
-        const drafts = selectedUnassignedItemIds.map(id => {
-            const item = unassignedItemsList.find(x => x.id === id);
-            return {
-                orderId: item.orderId,
-                orderItemId: item.itemId,
-                orderNumber: item.orderNumber,
-                itemName: item.itemName,
-                itemCode: item.itemCode,
-                size: item.size,
-                maxPieces: item.remainingPieces,
-                piecesToAssign: item.remainingPieces > 0 ? '' : 0,
-                rate: '',
-                cbm: ''
-            };
-        });
-        setAssignLineItems(drafts);
-        setShowBulkAssignModal(true);
-    };
-
-    const submitBulkAssignOrder = async () => {
-        setAssignError('');
-        if (!assigneeId) {
-            setAssignError(`Please specify the ${assignType === 'supplier' ? 'Supplier' : 'Job Manager'}.`);
-            return;
-        }
-
-        const hasAnyAssigned = assignLineItems.some(i => parseInt(i.piecesToAssign || 0) > 0);
-        if (!hasAnyAssigned) {
-            setAssignError('Please assign at least 1 piece to an item.');
-            return;
-        }
-
-        for (const item of assignLineItems) {
-            const pieces = parseInt(item.piecesToAssign || 0);
-            if (pieces > item.maxPieces) {
-                setAssignError(`Cannot assign more than available pieces for ${item.itemName} (Order #${item.orderNumber})`);
-                return;
-            }
-        }
-
-        setIsSaving(true);
-        try {
-            const payload = {
-                assignType,
-                assigneeId,
-                assignDate,
-                deliveryDate: assignDeliveryDate,
-                note: assignNote,
-                assignments: assignLineItems.map(item => ({
-                     orderId: item.orderId,
-                     orderItemId: item.orderItemId,
-                     pieces: parseInt(item.piecesToAssign || 0),
-                     rate: item.rate ? parseFloat(item.rate) : 0,
-                     cbm: item.cbm ? parseFloat(item.cbm) : 0
-                }))
-            };
-
-            await workflowApi.post('/workflow/bulk_assign_pieces', payload);
-            
-            if (assignType === 'supplier') {
-                const targetSupplier = suppliersList.find(s => s.id.toString() === assigneeId.toString());
-                const targetName = targetSupplier ? targetSupplier.name : 'Unknown';
-                const orderNumbers = [...new Set(assignLineItems.map(i => i.orderNumber))].join(', ');
-                const mockOrder = { order_number: orderNumbers };
-                generateAssignmentExcel(mockOrder, targetName, assignDate, payload.assignments.map((a, idx) => ({
-                    itemName: assignLineItems[idx].itemName,
-                    itemCode: assignLineItems[idx].itemCode,
-                    size: assignLineItems[idx].size,
-                    pieces: a.pieces,
-                    rate: a.rate,
-                    cbm: a.cbm
-                })), assignDeliveryDate, assignNote);
-            }
-
-            setShowBulkAssignModal(false);
-            setSelectedUnassignedItemIds([]);
-            fetchOrders();
-        } catch (error) {
-            setAssignError(error.response?.data?.error || 'Failed to bulk assign pieces.');
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const toggleUnassignedItemSelection = (id) => {
-        setSelectedUnassignedItemIds(prev => 
-            prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-        );
-    };
-
-    // ================= ITEMS MASTER =================
-
-    const handleOpenCreateItemModal = () => {
-        setNewItemName('');
-        setNewItemCode('');
-        setNewItemSize('');
-        setCreateItemError('');
-        setShowCreateItemModal(true);
-    };
-
-    const submitCreateItem = async (e) => {
-        e.preventDefault();
-        setCreateItemError('');
-        if (!newItemName) {
-            setCreateItemError('Item Name is required.');
-            return;
-        }
-        setIsSaving(true);
-        try {
-            await workflowApi.post('/workflow/item-master', {
-                itemName: newItemName,
-                itemCode: newItemCode,
-                size: newItemSize
-            });
-            setShowCreateItemModal(false);
-            fetchItemsMaster();
-        } catch (error) {
-            setCreateItemError(error.response?.data?.error || 'Failed to create item.');
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const handleDeleteItem = async (itemId) => {
-        if (!window.confirm('Delete this item from catalog?')) return;
-        try {
-            await workflowApi.delete(`/workflow/item-master/${itemId}`);
-            fetchItemsMaster();
-        } catch (error) {
-            console.error('Delete item error:', error);
-        }
-    };
-
-    const handleWorkflowLogin = async (e) => {
-        e.preventDefault();
-        setLoginError('');
-        setIsLoggingIn(true);
-        try {
-            const res = await axios.post(`${api.defaults.baseURL}/login`, { email: loginEmail, password: loginPassword });
-            const token = res.data.token;
-            const decoded = jwtDecode(token);
-            if (decoded.role !== 'owner') {
-                setLoginError('Access Denied: Only owners can sign in to T-Workflow.');
-                return;
-            }
-            localStorage.setItem('tWorkflowToken', token);
-            setTWorkflowToken(token);
-            setLoginEmail('');
-            setLoginPassword('');
-        } catch (err) {
-            setLoginError(err.response?.data?.error || 'Login failed. Please check credentials.');
-        } finally {
-            setIsLoggingIn(false);
-        }
-    };
-
+    // ================= LOGIN GUARD =================
     if (!tWorkflowToken) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -743,43 +63,20 @@ export default function TWorkflowPage({ setPage }) {
                         <h1 className="text-2xl font-bold text-gray-900 tracking-tight">T-Workflow Login</h1>
                         <p className="text-gray-500 text-sm mt-1">Owner access only</p>
                     </div>
-                    
                     <form onSubmit={handleWorkflowLogin} className="space-y-5">
                         <div>
-                            <input 
-                                type="email" 
-                                value={loginEmail} 
-                                onChange={(e) => setLoginEmail(e.target.value)} 
-                                placeholder="Email" 
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-gray-50 focus:bg-white transition-colors" 
-                                required 
-                            />
+                            <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="Email" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-gray-50 focus:bg-white transition-colors" required />
                         </div>
                         <div>
-                            <input 
-                                type="password" 
-                                value={loginPassword} 
-                                onChange={(e) => setLoginPassword(e.target.value)} 
-                                placeholder="Password" 
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-gray-50 focus:bg-white transition-colors" 
-                                required 
-                            />
+                            <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="Password" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-gray-50 focus:bg-white transition-colors" required />
                         </div>
-                        <button 
-                            type="submit" 
-                            className="w-full py-3 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:bg-orange-400 transition-colors shadow-sm"
-                            disabled={isLoggingIn}
-                        >
+                        <button type="submit" className="w-full py-3 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:bg-orange-400 transition-colors shadow-sm" disabled={isLoggingIn}>
                             {isLoggingIn ? 'Verifying...' : 'Sign In'}
                         </button>
                         {loginError && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-md">{loginError}</p>}
                     </form>
-                    
                     <div className="mt-8 text-center pt-6 border-t border-gray-100">
-                        <button 
-                            onClick={() => setPage('appsList')} 
-                            className="text-sm font-medium text-gray-500 hover:text-gray-800 transition-colors"
-                        >
+                        <button onClick={() => setPage('appsList')} className="text-sm font-medium text-gray-500 hover:text-gray-800 transition-colors">
                             ← Back to Applications
                         </button>
                     </div>
@@ -788,45 +85,9 @@ export default function TWorkflowPage({ setPage }) {
         );
     }
 
-    const handleCreateDirectory = async (type) => {
-        setDirectoryError('');
-        if (!newDirectoryName) {
-            setDirectoryError('Name is required');
-            return;
-        }
-        setIsSaving(true);
-        try {
-            const endpoint = type === 'supplier' ? '/workflow/suppliers' : '/workflow/job-managers';
-            await workflowApi.post(endpoint, {
-                name: newDirectoryName,
-                phone: newDirectoryPhone,
-                email: newDirectoryEmail,
-                address: newDirectoryAddress
-            });
-            fetchOptions();
-            if (type === 'supplier') setShowCreateSupplierModal(false);
-            if (type === 'job_manager') setShowCreateManagerModal(false);
-        } catch (error) {
-            setDirectoryError(error.response?.data?.error || 'Failed to create entry.');
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const handleDeleteDirectory = async (type, id, name) => {
-        if (!window.confirm(`Are you sure you want to delete ${name}? This will NOT delete their past assignments, but removes them from the directory.`)) return;
-        try {
-            const endpoint = type === 'supplier' ? `/workflow/suppliers/${id}` : `/workflow/job-managers/${id}`;
-            await workflowApi.delete(endpoint);
-            fetchOptions();
-        } catch (error) {
-            alert(error.response?.data?.error || 'Failed to delete entry.');
-        }
-    };
-
+    // ================= RENDER DIRECTORY TAB =================
     const renderDirectoryTab = (type, list, viewMode, setViewMode, setShowModal) => {
         const isSupplier = type === 'supplier';
-        
         if (viewMode === 'workloads') {
             const workloads = {};
             orders.forEach(order => {
@@ -834,29 +95,16 @@ export default function TWorkflowPage({ setPage }) {
                     item.assignments?.forEach(a => {
                         if (a.assign_type === type) {
                             const name = a.assignee_name || 'Unknown';
-                            if (!workloads[name]) {
-                                workloads[name] = { name: name, totalPieces: 0, orders: {} };
-                            }
+                            if (!workloads[name]) { workloads[name] = { name: name, totalPieces: 0, orders: {} }; }
                             workloads[name].totalPieces += parseInt(a.assigned_pieces || 0);
-                            
-                            if (!workloads[name].orders[order.order_number]) {
-                                workloads[name].orders[order.order_number] = {
-                                    order: order,
-                                    pieces: 0,
-                                    assignments: []
-                                };
-                            }
+                            if (!workloads[name].orders[order.order_number]) { workloads[name].orders[order.order_number] = { order: order, pieces: 0, assignments: [] }; }
                             workloads[name].orders[order.order_number].pieces += parseInt(a.assigned_pieces || 0);
-                            workloads[name].orders[order.order_number].assignments.push({
-                                ...a,
-                                itemName: item.item_name
-                            });
+                            workloads[name].orders[order.order_number].assignments.push({ ...a, itemName: item.item_name });
                         }
                     });
                 });
             });
             const workloadArr = Object.values(workloads).sort((a,b) => a.name.localeCompare(b.name));
-
             return (
                 <div>
                     <div className="flex justify-between items-center mb-6">
@@ -879,9 +127,7 @@ export default function TWorkflowPage({ setPage }) {
                                 <div key={w.name} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
                                     <div className="px-6 py-5 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
                                         <div className="flex items-center gap-4">
-                                            <div className="w-12 h-12 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center font-bold text-xl shadow-inner">
-                                                {w.name.charAt(0).toUpperCase()}
-                                            </div>
+                                            <div className="w-12 h-12 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center font-bold text-xl shadow-inner">{w.name.charAt(0).toUpperCase()}</div>
                                             <div>
                                                 <h3 className="font-bold text-gray-900 text-xl">{w.name}</h3>
                                                 <div className="flex items-center gap-3 text-sm text-gray-500 mt-0.5">
@@ -898,6 +144,7 @@ export default function TWorkflowPage({ setPage }) {
                                                 <div className="flex justify-between items-start mb-4 pb-3 border-b border-gray-100">
                                                     <div>
                                                         <span className="font-bold text-gray-800 text-lg group-hover:text-orange-600 transition-colors">#{orderGrp.order.order_number}</span>
+                                                        <p className="text-sm font-medium text-blue-600 mt-1 mb-0.5">PO: {orderGrp.assignments[0]?.po_number || '-'}</p>
                                                         <p className="text-xs text-gray-500 mt-0.5">{orderGrp.order.buyer_name}</p>
                                                     </div>
                                                     <span className="text-xs font-bold px-2.5 py-1.5 bg-orange-50 text-orange-700 rounded-lg">{orderGrp.pieces} pcs</span>
@@ -928,7 +175,7 @@ export default function TWorkflowPage({ setPage }) {
                             <button onClick={() => setViewMode('directory')} className={`px-5 py-2 rounded-md font-medium text-sm transition ${viewMode === 'directory' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Directory</button>
                         </div>
                         <button onClick={() => {
-                            setNewDirectoryName(''); setNewDirectoryPhone(''); setNewDirectoryEmail(''); setNewDirectoryAddress(''); setDirectoryError('');
+                            setNewDirectoryName(''); setNewDirectoryPhone(''); setNewDirectoryEmail(''); setNewDirectoryAddress('');
                             setShowModal(true);
                         }} className="px-5 py-2.5 bg-orange-600 text-white font-medium text-sm rounded-lg hover:bg-orange-700 shadow-sm flex items-center gap-2 transition-colors">
                             <PlusIcon width="16" height="16" /> Add {isSupplier ? 'Supplier' : 'Job Manager'}
@@ -948,9 +195,7 @@ export default function TWorkflowPage({ setPage }) {
                                 <div key={entry.id} className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md hover:border-blue-300 transition-all flex flex-col group">
                                     <div className="flex justify-between items-start mb-5 pb-4 border-b border-gray-100">
                                         <div className="flex items-center gap-4">
-                                            <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-700 flex items-center justify-center font-bold text-xl shadow-inner">
-                                                {entry.name.charAt(0).toUpperCase()}
-                                            </div>
+                                            <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-700 flex items-center justify-center font-bold text-xl shadow-inner">{entry.name.charAt(0).toUpperCase()}</div>
                                             <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-700 transition-colors">{entry.name}</h3>
                                         </div>
                                         <button onClick={() => handleDeleteDirectory(type, entry.id, entry.name)} className="text-gray-300 hover:text-red-500 p-2 rounded-md hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100">
@@ -1061,6 +306,16 @@ export default function TWorkflowPage({ setPage }) {
                     >
                         Job Managers
                     </button>
+                    <button
+                        onClick={() => setActiveTab('inventory')}
+                        className={`pb-3 font-medium text-sm transition-colors duration-200 ${
+                            activeTab === 'inventory' 
+                                ? 'text-orange-600 border-b-2 border-orange-600' 
+                                : 'text-gray-500 hover:text-gray-800'
+                        }`}
+                    >
+                        Inventory
+                    </button>
                 </div>
             </div>
 
@@ -1095,18 +350,20 @@ export default function TWorkflowPage({ setPage }) {
                             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                                 <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                                     <div className="col-span-1">#</div>
-                                    <div className="col-span-4">Item Name</div>
+                                    <div className="col-span-3">Item Name</div>
                                     <div className="col-span-3">Item Code</div>
                                     <div className="col-span-2">Size</div>
+                                    <div className="col-span-1">CBM</div>
                                     <div className="col-span-2 text-right">Actions</div>
                                 </div>
                                 <div className="divide-y divide-gray-100">
                                     {itemsMasterList.map((item, index) => (
                                         <div key={item.id} className="grid grid-cols-12 gap-4 px-6 py-3.5 items-center hover:bg-gray-50 transition-colors text-sm">
                                             <div className="col-span-1 text-gray-400 font-mono text-xs">{index + 1}</div>
-                                            <div className="col-span-4 font-semibold text-gray-800">{item.item_name}</div>
+                                            <div className="col-span-3 font-semibold text-gray-800">{item.item_name}</div>
                                             <div className="col-span-3 text-gray-600 font-mono text-xs">{item.item_code || '-'}</div>
                                             <div className="col-span-2 text-gray-600">{item.size || '-'}</div>
+                                            <div className="col-span-1 text-gray-600">{item.cbm || '-'}</div>
                                             <div className="col-span-2 text-right">
                                                 <button 
                                                     onClick={() => handleDeleteItem(item.id)}
@@ -1206,17 +463,77 @@ export default function TWorkflowPage({ setPage }) {
                     renderDirectoryTab('supplier', suppliersList, supplierViewMode, setSupplierViewMode, setShowCreateSupplierModal)
                 ) : activeTab === 'job_managers' ? (
                     renderDirectoryTab('job_manager', managersList, managerViewMode, setManagerViewMode, setShowCreateManagerModal)
+                ) : activeTab === 'inventory' ? (
+                    <div>
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-lg font-bold text-gray-800">Inventory Status</h2>
+                            <button onClick={fetchInventory} className="px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition text-sm">
+                                {isFetchingInventory ? 'Refreshing...' : 'Refresh'}
+                            </button>
+                        </div>
+                        {inventoryList.length === 0 ? (
+                            <div className="text-center py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
+                                <h3 className="text-xl font-medium text-gray-600 mb-2">No inventory available</h3>
+                                <p className="text-gray-400">Receive items via Inward Record to build inventory.</p>
+                            </div>
+                        ) : (
+                            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                <table className="min-w-full divide-y divide-gray-200 text-left">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Item Name</th>
+                                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Item Code</th>
+                                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center">Dimensions</th>
+                                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Available Pcs</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200">
+                                        {inventoryList.map((item, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                <td className="px-6 py-4 font-medium text-gray-800">{item.item_name}</td>
+                                                <td className="px-6 py-4 text-gray-500 font-mono text-sm">{item.item_code || '-'}</td>
+                                                <td className="px-6 py-4 text-gray-500 text-sm text-center">{item.size || '-'}</td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <span className="inline-flex items-center text-sm font-bold px-3 py-1 rounded-full bg-green-100 text-green-700">
+                                                        {item.total_pieces} pcs
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
                 ) : isLoading ? (
                     <div className="flex justify-center py-20">
                         <div className="w-10 h-10 border-4 border-gray-200 border-t-orange-600 rounded-full animate-spin"></div>
                     </div>
                 ) : activeTab === 'assigned' ? (
-                     orderGroupedAssignments.length === 0 ? (
-                         <div className="text-center py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
-                             <h3 className="text-xl font-medium text-gray-600 mb-2">No assigned orders found</h3>
-                             <p className="text-gray-400">Assign some items to see them here.</p>
-                         </div>
-                     ) : expandedAssignedGroupId ? (
+                     <div className="space-y-6">
+                         {!expandedAssignedOrderId && !expandedAssignedGroupId && (
+                             <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                                 <h3 className="text-lg font-bold text-gray-800">Assigned Orders</h3>
+                                 <div className="relative w-72">
+                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                         <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>
+                                     </div>
+                                     <input
+                                         type="text"
+                                         placeholder="Search Order or PO Number..."
+                                         value={assignedSearchQuery}
+                                         onChange={(e) => setAssignedSearchQuery(e.target.value)}
+                                         className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg leading-5 bg-gray-50 placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                                     />
+                                 </div>
+                             </div>
+                         )}
+                         {searchedOrderGroupedAssignments.length === 0 ? (
+                             <div className="text-center py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
+                                 <h3 className="text-xl font-medium text-gray-600 mb-2">No assigned orders found</h3>
+                                 <p className="text-gray-400">Try adjusting your search query or assign some items.</p>
+                             </div>
+                         ) : expandedAssignedGroupId ? (
                          /* ---- LEVEL 3: DEDICATED ASSIGNMENT VIEW ---- */
                          (() => {
                              let targetGroup = null;
@@ -1241,6 +558,9 @@ export default function TWorkflowPage({ setPage }) {
                                                      <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${targetGroup.assignType === 'supplier' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
                                                          {targetGroup.assignType === 'supplier' ? 'SUPPLIER' : 'JOB MANAGER'}: {targetGroup.assigneeName.toUpperCase()}
                                                      </span>
+                                                     <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">
+                                                         PO: {targetGroup.poNumber || '-'}
+                                                     </span>
                                                  </div>
                                                  <div className="text-gray-600 text-sm flex gap-3 mt-1">
                                                      <p><span className="font-medium">Assign Date:</span> {new Date(targetGroup.assignDate).toLocaleDateString('en-GB')}</p>
@@ -1254,6 +574,14 @@ export default function TWorkflowPage({ setPage }) {
                                                  {targetGroup.note && <p className="text-sm mt-1 text-gray-500 italic">Note: {targetGroup.note}</p>}
                                              </div>
                                              <div className="text-right flex items-center gap-3">
+                                                 <button 
+                                                     onClick={() => handleOpenInwardModal(targetGroup)}
+                                                     className="flex items-center gap-2 px-3 py-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors border border-indigo-200 bg-indigo-50/50"
+                                                     title="Inward Record"
+                                                 >
+                                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                                     <span className="text-sm font-medium">Inward Record</span>
+                                                 </button>
                                                  {targetGroup.assignType === 'supplier' && (
                                                      <button 
                                                          onClick={() => handleExportAssignmentExcel(targetGroup)}
@@ -1270,22 +598,23 @@ export default function TWorkflowPage({ setPage }) {
                                          <div>
                                              <div className="grid grid-cols-12 gap-4 text-xs font-semibold text-gray-500 tracking-wider mb-2 px-2 uppercase">
                                                  <div className="col-span-4">Item</div>
-                                                 <div className="col-span-2 text-center">Dimensions</div>
+                                                 <div className="col-span-3 text-center">Dimensions</div>
                                                  <div className="col-span-2 text-center">Rate</div>
-                                                 <div className="col-span-2 text-center">CBM</div>
-                                                 <div className="col-span-2 text-right">Assigned Pcs</div>
+                                                 <div className="col-span-3 text-right">Assigned / Rec'd</div>
                                              </div>
                                              <div className="space-y-2">
                                                  {targetGroup.items.map(item => (
-                                                     <div key={item.itemId} className="grid grid-cols-12 gap-4 items-center bg-gray-50 rounded-lg p-3 text-sm">
-                                                         <div className="col-span-4 font-medium text-gray-800">
-                                                             {item.itemName} <span className="text-gray-400 font-normal">({item.itemCode})</span>
+                                                     <div key={item.itemId} className="grid grid-cols-12 gap-4 items-center bg-gray-50 p-3 rounded-lg border border-gray-100 hover:bg-gray-100 transition-colors">
+                                                         <div className="col-span-4">
+                                                             <p className="text-sm font-bold text-gray-800">{item.itemName}</p>
+                                                             <p className="text-xs text-gray-500 font-mono mt-0.5">{item.itemCode || 'No Code'}</p>
                                                          </div>
-                                                         <div className="col-span-2 text-center text-gray-600 font-mono text-xs">{item.size || '-'}</div>
-                                                         <div className="col-span-2 text-center text-gray-700">{item.rate ? item.rate : '-'}</div>
-                                                         <div className="col-span-2 text-center text-gray-700">{item.cbm || '-'}</div>
-                                                         <div className="col-span-2 text-right font-bold text-blue-700">
-                                                             {item.assignedPieces} pcs
+                                                         <div className="col-span-3 text-center text-sm text-gray-600">{item.size || '-'}</div>
+                                                         <div className="col-span-2 text-center text-sm font-medium text-gray-800">₹{item.rate}</div>
+                                                         <div className="col-span-3 text-right text-sm">
+                                                             <span className="font-bold text-gray-800">{item.assignedPieces}</span>
+                                                             <span className="text-gray-400 mx-1">/</span>
+                                                             <span className={`font-bold ${item.receivedPieces >= item.assignedPieces ? 'text-green-600' : 'text-orange-500'}`}>{item.receivedPieces || 0}</span>
                                                          </div>
                                                      </div>
                                                  ))}
@@ -1328,6 +657,9 @@ export default function TWorkflowPage({ setPage }) {
                                                              <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${group.assignType === 'supplier' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
                                                                  {group.assignType === 'supplier' ? 'SUPPLIER' : 'JOB MANAGER'}: {(group.assigneeName || 'Unknown').toUpperCase()}
                                                              </span>
+                                                             <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">
+                                                                 PO: {group.poNumber || '-'}
+                                                             </span>
                                                          </div>
                                                          <p className="text-sm text-gray-500">
                                                              <span className="font-medium">Assigned Pieces:</span> {totalPcs}
@@ -1348,7 +680,7 @@ export default function TWorkflowPage({ setPage }) {
                      ) : (
                          /* ---- LEVEL 1: ORDER LIST VIEW: grouped by order number ---- */
                          <div className="grid gap-4">
-                             {orderGroupedAssignments.map(orderGroup => {
+                             {searchedOrderGroupedAssignments.map(orderGroup => {
                                  const totalAssignedPcs = orderGroup.assignments.reduce((sum, g) => sum + g.items.reduce((s, i) => s + i.assignedPieces, 0), 0);
                                  const uniqueAssignees = [...new Set(orderGroup.assignments.map(a => a.assigneeName))];
                                  return (
@@ -1382,7 +714,8 @@ export default function TWorkflowPage({ setPage }) {
                                  );
                              })}
                          </div>
-                     )
+                     )}
+                     </div>
                 ) : filteredOrders.length === 0 ? (
                     <div className="text-center py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
                         <h3 className="text-xl font-medium text-gray-600 mb-2">No {activeTab} orders found</h3>
@@ -1641,6 +974,17 @@ export default function TWorkflowPage({ setPage }) {
                                             <div className="w-20 relative">
                                                 <input 
                                                     type="number" 
+                                                    min="0"
+                                                    step="0.01"
+                                                    value={item.cbm}
+                                                    onChange={(e) => setCreateLineItems(createLineItems.map(x => x.id === item.id ? { ...x, cbm: e.target.value } : x))}
+                                                    placeholder="CBM"
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 text-center"
+                                                />
+                                            </div>
+                                            <div className="w-20 relative">
+                                                <input 
+                                                    type="number" 
                                                     min="1"
                                                     value={item.pieces}
                                                     onChange={(e) => setCreateLineItems(createLineItems.map(x => x.id === item.id ? { ...x, pieces: e.target.value } : x))}
@@ -1767,7 +1111,16 @@ export default function TWorkflowPage({ setPage }) {
                                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                         />
                                     </div>
-                                    <div className="col-span-2">
+                                    <div className="col-span-2 sm:col-span-1">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">PO Number</label>
+                                        <input 
+                                            type="text" 
+                                            value={assignPoNumber}
+                                            onChange={(e) => setAssignPoNumber(e.target.value)}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                                        />
+                                    </div>
+                                    <div className="col-span-2 sm:col-span-1">
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
                                         <input 
                                             type="text" 
@@ -1783,16 +1136,15 @@ export default function TWorkflowPage({ setPage }) {
                             <div>
                                 <h3 className="text-sm font-bold text-gray-800 mb-3 border-b border-gray-200 pb-2">Items to Assign</h3>
                                 <div className="space-y-3">
-                                    <div className="grid grid-cols-10 gap-3 text-xs font-semibold text-gray-500 uppercase px-1">
+                                    <div className="grid grid-cols-8 gap-3 text-xs font-semibold text-gray-500 uppercase px-1">
                                         <div className="col-span-3">Item</div>
                                         <div className="col-span-1 text-center">Rem. Pcs</div>
                                         <div className="col-span-2 text-center">Rate</div>
-                                        <div className="col-span-2 text-center">CBM</div>
                                         <div className="col-span-2 text-right">Assign Pcs</div>
                                     </div>
                                     
                                     {assignLineItems.map((item, index) => (
-                                        <div key={item.orderItemId} className={`grid grid-cols-10 gap-3 items-center p-3 rounded-lg border ${item.maxPieces > 0 ? 'bg-white border-gray-200' : 'bg-gray-50 border-gray-100 opacity-60'}`}>
+                                        <div key={item.orderItemId} className={`grid grid-cols-8 gap-3 items-center p-3 rounded-lg border ${item.maxPieces > 0 ? 'bg-white border-gray-200' : 'bg-gray-50 border-gray-100 opacity-60'}`}>
                                             <div className="col-span-3 font-medium text-gray-800 text-sm truncate" title={item.itemName}>
                                                 {item.itemName}
                                             </div>
@@ -1810,20 +1162,6 @@ export default function TWorkflowPage({ setPage }) {
                                                          ));
                                                     }}
                                                     placeholder="Rate"
-                                                    className="w-full px-2 py-1.5 border rounded-md text-xs border-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 text-center"
-                                                />
-                                            </div>
-                                            <div className="col-span-2">
-                                                <input 
-                                                    type="number"
-                                                    disabled={item.maxPieces === 0}
-                                                    value={item.cbm}
-                                                    onChange={(e) => {
-                                                         setAssignLineItems(assignLineItems.map(x => 
-                                                             x.orderItemId === item.orderItemId ? { ...x, cbm: e.target.value } : x
-                                                         ));
-                                                    }}
-                                                    placeholder="CBM"
                                                     className="w-full px-2 py-1.5 border rounded-md text-xs border-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 text-center"
                                                 />
                                             </div>
@@ -1914,6 +1252,17 @@ export default function TWorkflowPage({ setPage }) {
                                         value={newItemSize}
                                         onChange={(e) => setNewItemSize(e.target.value)}
                                         placeholder="e.g. 12x12x24, L, XL"
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-gray-400"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">CBM</label>
+                                    <input 
+                                        type="number" 
+                                        step="0.01"
+                                        value={newItemCbm}
+                                        onChange={(e) => setNewItemCbm(e.target.value)}
+                                        placeholder="Enter CBM value"
                                         className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-gray-400"
                                     />
                                 </div>
@@ -2014,8 +1363,19 @@ export default function TWorkflowPage({ setPage }) {
                                         />
                                     </div>
 
+                                    {/* PO Number */}
+                                    <div className="col-span-2 sm:col-span-1">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">PO Number *</label>
+                                        <input 
+                                            type="text" 
+                                            value={assignPoNumber} 
+                                            onChange={(e) => setAssignPoNumber(e.target.value)} 
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white font-medium"
+                                        />
+                                    </div>
+
                                     {/* Note */}
-                                    <div className="col-span-2">
+                                    <div className="col-span-2 sm:col-span-1">
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Global Note / Instruction</label>
                                         <input 
                                             type="text" 
@@ -2031,17 +1391,16 @@ export default function TWorkflowPage({ setPage }) {
                             <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-3 px-1">Selected Items to Assign</h3>
                             
                             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-                                <div className="grid grid-cols-12 gap-3 px-4 py-3 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                                <div className="grid grid-cols-10 gap-3 px-4 py-3 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                                     <div className="col-span-2">Order</div>
                                     <div className="col-span-3">Item Details</div>
                                     <div className="col-span-2 text-center">Remaining</div>
                                     <div className="col-span-2 text-center">Pcs to Assign</div>
                                     <div className="col-span-1 text-center">Rate</div>
-                                    <div className="col-span-2 text-center">CBM</div>
                                 </div>
                                 <div className="divide-y divide-gray-100">
                                     {assignLineItems.map((item, index) => (
-                                        <div key={index} className={`grid grid-cols-12 gap-3 px-4 py-3 items-center text-sm ${item.maxPieces === 0 ? 'bg-gray-50 opacity-60' : 'hover:bg-gray-50'} transition-colors`}>
+                                        <div key={index} className={`grid grid-cols-10 gap-3 px-4 py-3 items-center text-sm ${item.maxPieces === 0 ? 'bg-gray-50 opacity-60' : 'hover:bg-gray-50'} transition-colors`}>
                                             <div className="col-span-2 font-bold text-gray-800">
                                                 #{item.orderNumber}
                                             </div>
@@ -2085,22 +1444,7 @@ export default function TWorkflowPage({ setPage }) {
                                                     className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-xs"
                                                 />
                                             </div>
-                                            <div className="col-span-2">
-                                                <input 
-                                                    type="number" 
-                                                    min="0"
-                                                    step="0.01"
-                                                    value={item.cbm}
-                                                    onChange={(e) => {
-                                                        const newArr = [...assignLineItems];
-                                                        newArr[index].cbm = e.target.value;
-                                                        setAssignLineItems(newArr);
-                                                    }}
-                                                    placeholder="-"
-                                                    disabled={item.maxPieces === 0}
-                                                    className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-xs"
-                                                />
-                                            </div>
+
                                         </div>
                                     ))}
                                 </div>
@@ -2198,6 +1542,101 @@ export default function TWorkflowPage({ setPage }) {
                             <button onClick={() => setShowCreateManagerModal(false)} className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition">Cancel</button>
                             <button onClick={() => handleCreateDirectory('job_manager')} disabled={isSaving} className={`px-6 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg transition shadow-sm ${isSaving ? 'opacity-70 cursor-not-allowed' : 'hover:bg-blue-700'}`}>
                                 {isSaving ? 'Saving...' : 'Add Job Manager'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Inward Record Modal */}
+            {showInwardModal && activeInwardGroup && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50 backdrop-blur-sm transition-opacity">
+                    <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh]">
+                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-2xl">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-800">Inward Record</h2>
+                                <p className="text-sm text-gray-500 mt-1">Order #{activeInwardGroup.orderNumber} • {activeInwardGroup.assignType === 'supplier' ? 'Supplier' : 'Job Manager'}: {activeInwardGroup.assigneeName}</p>
+                            </div>
+                            <button onClick={() => setShowInwardModal(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
+                        </div>
+                        
+                        <div className="p-6 overflow-y-auto flex-1">
+                            {inwardError && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-200">{inwardError}</div>}
+                            
+                            <div className="grid grid-cols-2 gap-6 mb-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
+                                    <input 
+                                        type="date" 
+                                        value={inwardDate} 
+                                        onChange={(e) => setInwardDate(e.target.value)} 
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Challan No.</label>
+                                    <input 
+                                        type="text" 
+                                        value={inwardChallanNo} 
+                                        onChange={(e) => setInwardChallanNo(e.target.value)} 
+                                        placeholder="Enter Challan Number..."
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="border rounded-xl overflow-hidden bg-white">
+                                <table className="min-w-full divide-y divide-gray-200 text-left">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Item Name</th>
+                                            <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-center">Assigned</th>
+                                            <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-center">Previously Rec'd</th>
+                                            <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-center">Pending</th>
+                                            <th className="px-4 py-3 text-xs font-bold text-indigo-600 uppercase text-center">Receive Now</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200">
+                                        {inwardItems.map((item, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-50">
+                                                <td className="px-4 py-3">
+                                                    <div className="font-medium text-gray-800">{item.itemName}</div>
+                                                    <div className="text-xs text-gray-500">{item.itemCode || 'No code'} • {item.size || 'No size'}</div>
+                                                </td>
+                                                <td className="px-4 py-3 text-center text-sm font-medium">{item.assignedPieces}</td>
+                                                <td className="px-4 py-3 text-center text-sm text-green-600 font-medium">{item.previouslyReceived}</td>
+                                                <td className="px-4 py-3 text-center text-sm text-orange-500 font-bold">{item.maxPieces}</td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <input 
+                                                        type="number"
+                                                        min="0"
+                                                        max={item.maxPieces}
+                                                        value={item.piecesToReceive}
+                                                        onChange={(e) => {
+                                                            const newItems = [...inwardItems];
+                                                            newItems[idx].piecesToReceive = e.target.value;
+                                                            setInwardItems(newItems);
+                                                        }}
+                                                        disabled={item.maxPieces === 0}
+                                                        placeholder={item.maxPieces === 0 ? "Done" : "0"}
+                                                        className={`w-20 px-3 py-1.5 text-center border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold ${item.maxPieces === 0 ? 'bg-gray-100 text-gray-400 border-gray-200' : 'border-gray-300 text-indigo-700 bg-indigo-50'}`}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3 rounded-b-2xl">
+                            <button onClick={() => setShowInwardModal(false)} className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition">Cancel</button>
+                            <button 
+                                onClick={submitInwardRecord} 
+                                disabled={isSaving} 
+                                className={`px-6 py-2.5 text-sm font-bold text-white bg-indigo-600 rounded-lg transition shadow-sm ${isSaving ? 'opacity-70 cursor-not-allowed' : 'hover:bg-indigo-700'}`}
+                            >
+                                {isSaving ? 'Saving...' : 'Confirm Inward'}
                             </button>
                         </div>
                     </div>

@@ -10,7 +10,7 @@ import * as XLSX from 'xlsx-js-style';
  * @param {string} deliveryDate - Delivery date (YYYY-MM-DD)
  * @param {string} note - Global note for the assignment
  */
-export const generateAssignmentExcel = (order, assigneeName, assignDate, assignments, deliveryDate, note) => {
+export const generateAssignmentExcel = (order, assigneeName, assignDate, assignments, deliveryDate, note, poNumber) => {
     // 1. Setup the workbook and worksheet
     const wb = XLSX.utils.book_new();
     
@@ -93,7 +93,8 @@ export const generateAssignmentExcel = (order, assigneeName, assignDate, assignm
         [{ v: "GST IN : 08AFFPJ4990J1Z1", s: infoStyle }, { v: "", s: infoStyle }, { v: "", s: infoStyle }, { v: "", s: infoStyle }, { v: "+91 9166635555", s: { ...infoStyle, alignment: { horizontal: "right" } } }, { v: "", s: infoStyle }, { v: "", s: infoStyle }],
         [{ v: "OSWAL HANDICRAFTS", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }, { v: "", s: bigTextStyle }],
         [{ v: "G-793, BORANDADA , JODHPUR", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }, { v: "", s: addressStyle }],
-        [{ v: `PO.NO : ${order.order_number}`, s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: `DATE : ${new Date(assignDate).toLocaleDateString('en-GB')}`, s: { ...poStyle, alignment: { horizontal: "right" } } }, { v: "", s: poStyle }, { v: "", s: poStyle }],
+        [{ v: `PO.NO : ${poNumber || '-'}`, s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: `DATE : ${new Date(assignDate).toLocaleDateString('en-GB')}`, s: { ...poStyle, alignment: { horizontal: "right" } } }, { v: "", s: poStyle }, { v: "", s: poStyle }],
+        [{ v: `REFERENCE NO : ${order.order_number}`, s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }],
         [{ v: `SUPPLIER NAME : ${assigneeName}`, s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }, { v: "", s: poStyle }],
         [], // Empty row separator
         // Table Headers
@@ -172,7 +173,8 @@ export const generateAssignmentExcel = (order, assigneeName, assignDate, assignm
         { s: { r: 3, c: 0 }, e: { r: 3, c: 6 } }, // Merge Address
         { s: { r: 4, c: 0 }, e: { r: 4, c: 3 } }, // Merge PO.NO
         { s: { r: 4, c: 4 }, e: { r: 4, c: 6 } }, // Merge DATE
-        { s: { r: 5, c: 0 }, e: { r: 5, c: 6 } }, // Merge SUPPLIER NAME
+        { s: { r: 5, c: 0 }, e: { r: 5, c: 6 } }, // Merge REFERENCE NO
+        { s: { r: 6, c: 0 }, e: { r: 6, c: 6 } }, // Merge SUPPLIER NAME
         { s: { r: totalRowIndex, c: 0 }, e: { r: totalRowIndex, c: 3 } }, // Merge TOTAL label
         { s: { r: footerRowStart, c: 0 }, e: { r: footerRowStart, c: 3 } }, // Merge Delivery Date
         { s: { r: footerRowStart + 1, c: 0 }, e: { r: footerRowStart + 1, c: 3 } }, // Merge Note
